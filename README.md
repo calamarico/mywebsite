@@ -22,3 +22,4 @@ npm run preview  # previsualizar build
 
 - GitHub — [@calamarico](https://github.com/calamarico)
 - Stack Overflow — [kalamarico](https://stackoverflow.com/users/1034105/kalamarico)
+- Email — [this@kalamarico.lol](mailto:this@kalamarico.lol)
