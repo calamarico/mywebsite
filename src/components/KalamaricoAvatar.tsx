@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import spriteUrl from '../assets/kalamarico_sprite.png'
+import spriteUrl from '../assets/kalamarico_sprite_v2.png'
 
-export type AvatarState = 'normal' | 'surprised' | 'blink' | 'smile' | 'grimace'
+export type AvatarState =
+  | 'normal'
+  | 'surprised'
+  | 'blink'
+  | 'smile'
+  | 'grimace'
+  | 'electro1'
+  | 'electro2'
+  | 'hold1'
+  | 'hold2'
+  | 'blue1'
+  | 'blue2'
+  | 'purple1'
+  | 'purple2'
+  | 'purple3'
 
 export interface AvatarAnimation {
   frames: AvatarState[]
@@ -9,7 +23,7 @@ export interface AvatarAnimation {
 }
 
 const FRAME_SIZE = 256
-const FRAME_COUNT = 5
+const FRAME_COUNT = 14
 
 const STATE_INDEX: Record<AvatarState, number> = {
   normal: 0,
@@ -17,6 +31,15 @@ const STATE_INDEX: Record<AvatarState, number> = {
   blink: 2,
   smile: 3,
   grimace: 4,
+  electro1: 5,
+  electro2: 6,
+  hold1: 7,
+  hold2: 8,
+  blue1: 9,
+  blue2: 10,
+  purple1: 11,
+  purple2: 12,
+  purple3: 13,
 }
 
 export const ANIMATIONS = {
@@ -36,6 +59,46 @@ export const ANIMATIONS = {
     frames: ['grimace', 'normal'],
     frameDuration: [900, 0],
   },
+  electrocuted: {
+    frames: [
+      'electro1', 'electro2', 'normal',
+      'electro1', 'electro2', 'normal',
+      'electro1', 'electro2', 'electro1', 'electro2',
+      'electro1', 'electro2', 'normal',
+      'electro1', 'normal',
+      'normal',
+    ],
+    frameDuration: [
+      60, 60, 40,
+      60, 60, 40,
+      50, 50, 50, 50,
+      80, 80, 120,
+      200, 400,
+      0,
+    ],
+  },
+  holdBreath: {
+    frames: [
+      'hold1', 'hold1',
+      'hold2', 'hold2',
+      'blue1', 'blue1',
+      'blue2', 'blue2',
+      'purple1', 'purple1',
+      'purple2', 'purple2',
+      'purple3', 'purple3', 'purple3',
+      'normal',
+    ],
+    frameDuration: [
+      300, 300,
+      350, 350,
+      400, 400,
+      400, 400,
+      450, 450,
+      500, 500,
+      600, 600, 600,
+      0,
+    ],
+  },
 } satisfies Record<string, AvatarAnimation>
 
 const RANDOM_POOL: AvatarAnimation[] = [
@@ -43,6 +106,8 @@ const RANDOM_POOL: AvatarAnimation[] = [
   ANIMATIONS.surprised,
   ANIMATIONS.smile,
   ANIMATIONS.grimace,
+  ANIMATIONS.electrocuted,
+  ANIMATIONS.holdBreath,
 ]
 
 export interface KalamaricoController {
@@ -51,12 +116,21 @@ export interface KalamaricoController {
   tryPlayRandom: () => Promise<boolean>
 }
 
-export function useKalamaricoAvatar(): KalamaricoController {
+export interface UseKalamaricoOptions {
+  onAnimationStart?: (anim: AvatarAnimation) => void
+}
+
+export function useKalamaricoAvatar(
+  options: UseKalamaricoOptions = {},
+): KalamaricoController {
   const [state, setState] = useState<AvatarState>('normal')
   const busyRef = useRef(false)
   const cancelRef = useRef(false)
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
   const lastAnimRef = useRef<AvatarAnimation | null>(null)
+
+  const onStartRef = useRef(options.onAnimationStart)
+  onStartRef.current = options.onAnimationStart
 
   const wait = useCallback(
     (ms: number) =>
@@ -75,6 +149,7 @@ export function useKalamaricoAvatar(): KalamaricoController {
       if (busyRef.current || cancelRef.current) return false
       busyRef.current = true
       try {
+        onStartRef.current?.(anim)
         const { frames, frameDuration } = anim
         const durations = Array.isArray(frameDuration)
           ? frameDuration
@@ -137,14 +212,19 @@ export function useKalamaricoAvatar(): KalamaricoController {
 interface KalamaricoAvatarProps {
   state: AvatarState
   size?: number
+  ref?: React.Ref<HTMLSpanElement>
 }
 
-export function KalamaricoAvatar({ state, size = 44 }: KalamaricoAvatarProps) {
+export function KalamaricoAvatar({
+  state,
+  size = 44,
+  ref,
+}: KalamaricoAvatarProps) {
   const scale = size / FRAME_SIZE
   const offsetX = -(STATE_INDEX[state] * FRAME_SIZE) * scale
 
   return (
-    <span className="avatar" aria-label="Avatar Kalamarico">
+    <span ref={ref} className="avatar" aria-label="Avatar Kalamarico">
       <div
         style={{
           width: size,
