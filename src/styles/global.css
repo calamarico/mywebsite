@@ -12,7 +12,7 @@
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
 
   --space: clamp(1.25rem, 3vw, 2.5rem);
-  --hero-size: clamp(3.5rem, 15vw, 12rem);
+  --hero-size: clamp(2.25rem, 15vw, 12rem);
 
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 
@@ -239,6 +239,12 @@ img { display: block; max-width: 100%; }
   .social a,
   .social a::after {
     transition: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .hero-title {
+    font-size: clamp(2rem, 13vw, 4.5rem);
   }
 }
 
