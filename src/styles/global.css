@@ -68,10 +68,13 @@ img { display: block; max-width: 100%; }
 
 .site-header .handle {
   font-family: var(--font-mono);
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
+  font-style: italic;
   color: var(--muted);
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
+  opacity: 0.7;
   cursor: none;
+  margin-left: 2px;
 }
 
 .site-main {
