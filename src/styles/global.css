@@ -71,6 +71,7 @@ img { display: block; max-width: 100%; }
   font-size: 0.875rem;
   color: var(--muted);
   letter-spacing: 0.02em;
+  cursor: none;
 }
 
 .site-main {
@@ -87,8 +88,7 @@ img { display: block; max-width: 100%; }
 /* ─── Avatar ──────────────────────────────────────── */
 
 .avatar {
-  width: 44px;
-  height: 44px;
+  display: inline-block;
   border-radius: 50%;
   overflow: hidden;
   outline: 1px solid var(--accent-soft);

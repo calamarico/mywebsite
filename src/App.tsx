@@ -50,7 +50,7 @@ function App() {
     <>
       {container}
       <header className="site-header" data-reveal="1">
-        <KalamaricoAvatar ref={avatarRef} state={state} />
+        <KalamaricoAvatar ref={avatarRef} state={state} size={64} />
         <span className="handle">@calamarico</span>
       </header>
       <main className="site-main">

@@ -89,13 +89,13 @@ export const ANIMATIONS = {
       'normal',
     ],
     frameDuration: [
-      300, 300,
-      350, 350,
-      400, 400,
-      400, 400,
-      450, 450,
-      500, 500,
-      600, 600, 600,
+      150, 150,
+      175, 175,
+      200, 200,
+      200, 200,
+      225, 225,
+      250, 250,
+      300, 300, 300,
       0,
     ],
   },
@@ -224,7 +224,12 @@ export function KalamaricoAvatar({
   const offsetX = -(STATE_INDEX[state] * FRAME_SIZE) * scale
 
   return (
-    <span ref={ref} className="avatar" aria-label="Avatar Kalamarico">
+    <span
+      ref={ref}
+      className="avatar"
+      style={{ width: size, height: size }}
+      aria-label="Avatar Kalamarico"
+    >
       <div
         style={{
           width: size,
