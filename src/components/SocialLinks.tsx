@@ -48,7 +48,7 @@ export function SocialLinks() {
           aria-label="Email — this@kalamarico.lol"
         >
           <MailIcon />
-          <span>email</span>
+          <span>contact</span>
         </a>
       </li>
     </ul>
