@@ -1,6 +1,6 @@
 # kalamarico
 
-Sitio personal de **Daniel Hernández** — Senior Frontend Developer.
+Sitio personal de **Kalamarico** — Senior Frontend Developer.
 
 También conocido como `kalamarico` / `calamarico` por ahí.
 
