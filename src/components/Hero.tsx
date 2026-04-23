@@ -6,13 +6,6 @@ const TITLE = 'KALAMARICO'
 const ROLE = 'Senior Frontend Developer'
 const IDLE_MS = 12_000
 const AUDIO_SRC = '/audio/piano.mp3'
-const ACTIVITY_EVENTS = [
-  'mousemove',
-  'keydown',
-  'scroll',
-  'touchstart',
-  'pointerdown',
-] as const
 // ───────────────────────────────────────────────────────────
 
 const TITLE_LETTERS = TITLE.split('')
@@ -26,8 +19,6 @@ interface HeroProps {
 export function Hero({ onTitleHover }: HeroProps) {
   const [mode, setMode] = useState<HeroMode>('text')
   const idleTimerRef = useRef<number | undefined>(undefined)
-  const modeRef = useRef<HeroMode>(mode)
-  modeRef.current = mode
 
   const scheduleIdle = useCallback(() => {
     window.clearTimeout(idleTimerRef.current)
@@ -37,27 +28,24 @@ export function Hero({ onTitleHover }: HeroProps) {
   }, [])
 
   useEffect(() => {
-    const handleActivity = () => {
-      // En modo piano la actividad global NO saca — solo el hover del piano.
-      if (modeRef.current === 'piano') return
-      scheduleIdle()
-    }
-
-    ACTIVITY_EVENTS.forEach((evt) =>
-      window.addEventListener(evt, handleActivity, { passive: true }),
-    )
     scheduleIdle()
-
     return () => {
       window.clearTimeout(idleTimerRef.current)
-      ACTIVITY_EVENTS.forEach((evt) =>
-        window.removeEventListener(evt, handleActivity),
-      )
     }
   }, [scheduleIdle])
 
+  // Al entrar con el puntero en el h1 cancelamos la cuenta atrás; al salir
+  // la rearmamos. Nada más en la página afecta al timer.
+  const handleTitleEnter = useCallback(() => {
+    window.clearTimeout(idleTimerRef.current)
+    onTitleHover?.()
+  }, [onTitleHover])
+
+  const handleTitleLeave = useCallback(() => {
+    scheduleIdle()
+  }, [scheduleIdle])
+
   const exitPianoMode = useCallback(() => {
-    if (modeRef.current !== 'piano') return
     setMode('text')
     scheduleIdle()
   }, [scheduleIdle])
@@ -69,7 +57,8 @@ export function Hero({ onTitleHover }: HeroProps) {
       <div className="hero-stage" data-reveal="2">
         <h1
           className="hero-title"
-          onMouseEnter={onTitleHover}
+          onMouseEnter={handleTitleEnter}
+          onMouseLeave={handleTitleLeave}
           aria-label={TITLE}
         >
           {TITLE_LETTERS.map((ch, i) => (
