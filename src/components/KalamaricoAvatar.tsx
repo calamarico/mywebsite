@@ -118,6 +118,7 @@ export interface KalamaricoController {
 
 export interface UseKalamaricoOptions {
   onAnimationStart?: (anim: AvatarAnimation) => void
+  paused?: boolean
 }
 
 export function useKalamaricoAvatar(
@@ -131,6 +132,8 @@ export function useKalamaricoAvatar(
 
   const onStartRef = useRef(options.onAnimationStart)
   onStartRef.current = options.onAnimationStart
+
+  const { paused = false } = options
 
   const wait = useCallback(
     (ms: number) =>
@@ -146,7 +149,7 @@ export function useKalamaricoAvatar(
 
   const tryPlay = useCallback(
     async (anim: AvatarAnimation): Promise<boolean> => {
-      if (busyRef.current || cancelRef.current) return false
+      if (busyRef.current) return false
       busyRef.current = true
       try {
         onStartRef.current?.(anim)
@@ -156,7 +159,6 @@ export function useKalamaricoAvatar(
           : frames.map(() => frameDuration)
 
         for (let i = 0; i < frames.length; i++) {
-          if (cancelRef.current) return false
           setState(frames[i])
           const delay = durations[i] ?? 0
           if (delay > 0) await wait(delay)
@@ -171,7 +173,7 @@ export function useKalamaricoAvatar(
   )
 
   const tryPlayRandom = useCallback(async (): Promise<boolean> => {
-    if (busyRef.current || cancelRef.current) return false
+    if (busyRef.current) return false
     let pick = lastAnimRef.current
     while (pick === lastAnimRef.current) {
       pick = RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)]
@@ -180,6 +182,7 @@ export function useKalamaricoAvatar(
   }, [tryPlay])
 
   useEffect(() => {
+    if (paused) return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
 
     cancelRef.current = false
@@ -203,8 +206,14 @@ export function useKalamaricoAvatar(
       cancelRef.current = true
       timersRef.current.forEach(clearTimeout)
       timersRef.current = []
+      // Defensive reset: una animación in-flight del loop podría dejar
+      // busyRef colgado al cancelar sus timers. Lo liberamos para que las
+      // llamadas externas a tryPlay (p.ej. surprised por click) sigan
+      // pudiendo ejecutarse durante el modo piano.
+      busyRef.current = false
+      setState('normal')
     }
-  }, [wait, tryPlay, tryPlayRandom])
+  }, [wait, tryPlay, tryPlayRandom, paused])
 
   return { state, tryPlay, tryPlayRandom }
 }
