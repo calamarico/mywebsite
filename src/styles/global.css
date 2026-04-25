@@ -416,6 +416,31 @@ img { display: block; max-width: 100%; }
     2px 6px 10px rgba(0, 0, 0, 0.6);
 }
 
+/* Barra de progreso de la canción. Justo debajo de las teclas, scaleX con
+   transición linear que interpola entre los `timeupdate` del audio (~4-5
+   fps), dando una sensación fluida sin RAF dedicado. */
+.hero-piano__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 280ms linear;
+}
+
+.hero[data-mode='piano'] .hero-piano__progress {
+  opacity: 0.75;
+  transition:
+    transform 280ms linear,
+    opacity 200ms 200ms ease-out;
+}
+
 /* ─── Social links ────────────────────────────────── */
 
 .social {
@@ -507,6 +532,9 @@ img { display: block; max-width: 100%; }
   .hero-piano__white[data-pressed='true'],
   .hero-piano__black[data-pressed='true'] {
     transform: none;
+  }
+  .hero-piano__progress {
+    transition: none;
   }
   .hero-encore {
     animation: none;

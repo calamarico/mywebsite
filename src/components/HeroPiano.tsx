@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFFTPiano, type Band } from '../hooks/useFFTPiano'
 
 // ─── Config (tunable) ──────────────────────────────────────
@@ -42,6 +42,23 @@ export function HeroPiano({
   const blackRefs = useRef<(HTMLDivElement | null)[]>([])
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const releaseTimersRef = useRef<Record<number, number>>({})
+  // Progreso de la canción (0..1). Actualizado vía `timeupdate` (~4-5 fps);
+  // CSS interpola entre ticks con `transition: transform 280ms linear`.
+  const [progress, setProgress] = useState(0)
+
+  const handleTimeUpdate = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const { currentTime, duration } = audio
+    if (!Number.isFinite(duration) || duration <= 0) return
+    setProgress(currentTime / duration)
+  }, [])
+
+  // Reset al entrar a piano para que el replay/encore no muestre brevemente
+  // la barra llena de la canción anterior antes del primer `timeupdate`.
+  useEffect(() => {
+    if (playing) setProgress(0)
+  }, [playing])
 
   const resolveKey = useCallback((keyIndex: number): HTMLDivElement | null => {
     if (keyIndex < WHITE_COUNT) return whiteRefs.current[keyIndex] ?? null
@@ -99,6 +116,7 @@ export function HeroPiano({
           preload="auto"
           playsInline
           onEnded={onAudioEnded}
+          onTimeUpdate={handleTimeUpdate}
         />
       )}
       <div className="hero-piano__whites">
@@ -123,6 +141,11 @@ export function HeroPiano({
           />
         ))}
       </div>
+      <div
+        className="hero-piano__progress"
+        style={{ transform: `scaleX(${progress})` }}
+        aria-hidden="true"
+      />
     </div>
   )
 }

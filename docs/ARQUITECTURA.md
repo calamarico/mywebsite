@@ -251,13 +251,15 @@ Cada letra es un `<span>` con `--i` (índice ascendente) y `--i-rev` (descendent
 
 ```html
 <div class="hero-piano" onPointerEnter={onHoverOut}>
-  <audio src={audioSrc} preload="auto" playsInline onEnded={onAudioEnded} />
+  <audio src={audioSrc} preload="auto" playsInline
+         onEnded={onAudioEnded} onTimeUpdate={handleTimeUpdate} />
   <div class="hero-piano__whites">
     <div class="hero-piano__white"></div> × 29
   </div>
   <div class="hero-piano__blacks">
     <div class="hero-piano__black"></div> × 20
   </div>
+  <div class="hero-piano__progress" style="transform: scaleX(progress)" />
 </div>
 ```
 
@@ -289,6 +291,17 @@ Las blancas en grid `repeat(29, 1fr)`. Las negras en `position: absolute` con su
 - **Pulsada (`data-pressed="true"`)**: blanca pasa a `#f5d8ff → var(--accent)` con glow lavanda; negra pasa a `#a770cf → #5e3a7a`. `transform: translateY(2px)` simula la pulsación.
 - **Modo piano activo**: opacidad 1, scale 1, transition 420ms.
 - **Modo texto**: opacidad 0, `transform: translateY(16px) scale(0.94)`.
+
+#### Barra de progreso
+
+Una `<div class="hero-piano__progress">` justo debajo de las teclas (2px de alto, color accent, opacidad 0.75) muestra cuánto queda de la canción. Implementación:
+
+- Estado React: `const [progress, setProgress] = useState(0)`. Actualizado en el handler `onTimeUpdate` del `<audio>`.
+- `progress = audio.currentTime / audio.duration`. El evento `timeupdate` dispara ~4-5 veces por segundo en la mayoría de browsers.
+- El render aplica `transform: scaleX(progress)` (GPU-accelerated, sin reflow).
+- CSS interpola entre ticks: `transition: transform 280ms linear`. La barra avanza fluida visualmente entre actualizaciones del audio.
+- En `prefers-reduced-motion: reduce` se quita la transition (la barra salta en cada tick sin interpolación animada).
+- Reset a `0` cuando `playing` flipa a `true` — evita que en el replay/encore la barra empiece llena de la canción anterior antes del primer `timeupdate`.
 
 #### Flasheo imperativo
 
@@ -687,6 +700,7 @@ El navegador libera el lock automáticamente cuando el tab se oculta (`document.
    - Avatar: el hook recibe `whistle=true` → cleanup del random loop → arranca el loop continuo de `ANIMATIONS.whistle` (8 frames alternando whistle1/whistle3 con patrón asimétrico, 1760ms por ciclo).
    - useFFTPiano: `playing=true` → `audio.currentTime=0`, `audio.play()`, RAF arranca.
    - El MP3 suena. Las teclas se iluminan en lavanda siguiendo el FFT.
+   - La barra de progreso (`.hero-piano__progress`) aparece debajo del piano con `opacity: 0.75` y empieza a llenarse según `audio.currentTime / audio.duration`.
    - App arranca `useMusicalNotes` → notas `♩ ♪ ♫ ♬` empiezan a flotar hacia arriba alrededor del avatar (rate 340ms, paleta lavanda/blanco).
    - App pide `Screen Wake Lock` vía `useScreenWakeLock` → en mobile la pantalla no se apagará durante la canción.
 
@@ -944,6 +958,12 @@ Aplicado a: `heroModeRef` (App), `modeRef` (Hero), `onStartRef` (KalamaricoAvata
 - `BLACK_COUNT` (20)
 - `DEFAULT_PRESS_MS` (120)
 - `BANDS[]` (5 bandas, cada una con `keys`, `binStart`, `binEnd`, `threshold`, `cooldownMs`)
+
+`.hero-piano__progress` (CSS):
+- `bottom: -10px` (separación bajo las teclas)
+- `height: 2px`, `border-radius: 1px`
+- `opacity: 0.75` durante modo piano
+- `transition: transform 280ms linear` (interpola entre `timeupdate`)
 
 `useFFTPiano.ts` (defaults sobrescribibles por prop):
 - `pressMs` (120)
