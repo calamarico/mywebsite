@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import spriteUrl from '../assets/kalamarico_sprite_v3.png'
+import { useLatestRef } from '../hooks/useLatestRef'
 
 export type AvatarState =
   | 'normal'
@@ -139,17 +140,24 @@ export interface UseKalamaricoOptions {
   whistle?: boolean
 }
 
+interface PendingTimer {
+  id: ReturnType<typeof setTimeout>
+  resolve: () => void
+}
+
 export function useKalamaricoAvatar(
   options: UseKalamaricoOptions = {},
 ): KalamaricoController {
   const [state, setState] = useState<AvatarState>('normal')
   const busyRef = useRef(false)
   const cancelRef = useRef(false)
-  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  // Cada timer guarda también su `resolve` para que el cleanup pueda
+  // desbloquear las promesas que estuvieran awaitando en `wait()`. Sin esto,
+  // un `tryPlay` cancelado mid-await dejaba la promesa dangling.
+  const timersRef = useRef<PendingTimer[]>([])
   const lastAnimRef = useRef<AvatarAnimation | null>(null)
 
-  const onStartRef = useRef(options.onAnimationStart)
-  onStartRef.current = options.onAnimationStart
+  const onStartRef = useLatestRef(options.onAnimationStart)
 
   const { whistle = false } = options
 
@@ -157,10 +165,10 @@ export function useKalamaricoAvatar(
     (ms: number) =>
       new Promise<void>((resolve) => {
         const id = setTimeout(() => {
-          timersRef.current = timersRef.current.filter((t) => t !== id)
+          timersRef.current = timersRef.current.filter((t) => t.id !== id)
           resolve()
         }, ms)
-        timersRef.current.push(id)
+        timersRef.current.push({ id, resolve })
       }),
     [],
   )
@@ -232,11 +240,18 @@ export function useKalamaricoAvatar(
 
     return () => {
       cancelRef.current = true
-      timersRef.current.forEach(clearTimeout)
+      // Cancelar timers Y resolver las promesas asociadas. Sin el resolve(),
+      // los `await wait(...)` dentro de `tryPlay` quedaban dangling para
+      // siempre. Con el resolve, el for-loop de `tryPlay` avanza al siguiente
+      // check de cancelRef y sale limpio.
+      timersRef.current.forEach(({ id, resolve }) => {
+        clearTimeout(id)
+        resolve()
+      })
       timersRef.current = []
-      // Defensive reset: una animación in-flight (random o whistle) podría
-      // dejar busyRef colgado al cancelar sus timers. Lo liberamos para que
-      // las llamadas externas a tryPlay sigan pudiendo ejecutarse.
+      // Defensive reset: redundante tras el resolve() (tryPlay sale por su
+      // for-loop y el finally pone busyRef a false), pero defensivo por si
+      // hubiera algún path que no pase por el for-loop.
       busyRef.current = false
       setState('normal')
     }

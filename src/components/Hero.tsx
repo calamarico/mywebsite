@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { HeroPiano } from './HeroPiano'
 import { KalAmaricoIntro } from './KalAmaricoIntro'
+import { useLatestRef } from '../hooks/useLatestRef'
 
 // ─── Config (tunable) ──────────────────────────────────────
 const TITLE = 'KALAMARICO'
@@ -40,9 +41,8 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
   // NO se muestra ni replay es posible.
   const audioFailedRef = useRef(false)
   // Espejo de `mode` para que callbacks estables consulten el state actual
-  // sin ser dependencia.
-  const modeRef = useRef<HeroMode>(mode)
-  modeRef.current = mode
+  // sin ser dependencia. Asignación post-commit vía useLatestRef.
+  const modeRef = useLatestRef(mode)
 
   useEffect(() => {
     onModeChange?.(mode)

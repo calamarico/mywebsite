@@ -49,8 +49,10 @@ mywebsite/
 │   ├── hooks/
 │   │   ├── useClickHints.tsx   # texto "click anywhere" + ondas aleatorias antes del primer click
 │   │   ├── useFFTPiano.ts      # AudioContext + Analyser + RAF + onset detection
+│   │   ├── useLatestRef.ts     # helper: espejo de state/prop en ref con asignación post-commit
 │   │   ├── useMusicalNotes.tsx # notas musicales flotantes alrededor del avatar durante modo piano
-│   │   └── usePixelParticles.tsx  # bursts de partículas pixel-art al disparar animaciones
+│   │   ├── usePixelParticles.tsx  # bursts de partículas pixel-art al disparar animaciones
+│   │   └── useScreenWakeLock.ts   # mantiene la pantalla despierta durante el modo piano (mobile)
 │   └── styles/
 │       └── global.css          # tokens, layout, hero, piano, animaciones, reduced-motion
 ├── docs/
@@ -147,10 +149,10 @@ Expone un **controller** con:
   2. El loop respeta `cancelRef` entre ciclos para parar limpio cuando cambia el prop.
 
 El cleanup del effect (común a ambos modos):
-- Cancela timers (`clearTimeout` sobre `timersRef`).
 - Marca `cancelRef.current = true` para que `tryPlay` aborte entre frames.
+- Cancela timers Y **resuelve las promesas asociadas**. Cada entrada de `timersRef` es `{ id, resolve }`; al cancelar, llamamos `clearTimeout(id)` Y `resolve()` para desbloquear los `await wait(...)` pendientes — el for-loop de `tryPlay` avanza al siguiente check de `cancelRef` y sale limpio (cero promesas dangling).
 - Hace `setState('normal')` defensivo — evita que el avatar quede atascado en un frame intermedio (importante al salir del modo whistle: si no, se quedaría con la boca abierta).
-- Resetea `busyRef.current = false` por si una animación huérfana lo dejó colgado.
+- Resetea `busyRef.current = false` (redundante tras el resolve(), defensivo por si algún path no pase por el for-loop).
 
 > **Por qué un único effect comparte ambos modos**: el cleanup uniforme (`cancelRef + clearTimers + setState('normal')`) garantiza que cualquier transición entre modos deje el avatar en estado limpio. Versiones anteriores intentaron un loop separado fuera del hook y se enredaron con races (ver §6.2).
 
@@ -627,6 +629,34 @@ Solo aparecen **antes del primer click** del usuario. Una vez `heroMode` deja de
 
 App también guard contra `prefers-reduced-motion: reduce` antes de `startHints`. Mismo patrón que `useMusicalNotes`.
 
+### 4.13 Wake Lock — `useScreenWakeLock.ts`
+
+Hook que mantiene la pantalla despierta mientras el flag `active` sea `true`. Diseñado para que en mobile la pantalla no se apague mid-canción.
+
+#### API
+
+```ts
+useScreenWakeLock(heroMode === 'piano')
+```
+
+Llamado desde App. Cuando `heroMode === 'piano'`, el hook pide un `WakeLockSentinel` vía `navigator.wakeLock.request('screen')`. Cuando el flag vuelve a `false`, el effect cleanup llama `sentinel.release()`.
+
+#### Compatibilidad
+
+- Chrome/Edge: 2020+.
+- Safari iOS: 16.4+.
+- Firefox: soportado.
+- Si el browser no expone `navigator.wakeLock`, el hook es **no-op silencioso** (return early).
+- Requiere HTTPS.
+
+#### Auto-release y re-adquisición
+
+El navegador libera el lock automáticamente cuando el tab se oculta (`document.hidden === true`). El hook escucha `visibilitychange` y re-adquiere el lock al volver a `'visible'` (siempre que el flag siga activo). Cubre el caso de "salir del tab durante la canción y volver mientras sigue sonando".
+
+#### Errores no críticos
+
+`acquire()` puede rechazar (permisos, batería baja en algunos OS). El hook lo captura silenciosamente — no hay UI de error porque mantener la pantalla despierta es nice-to-have, no crítico.
+
 ---
 
 ## 5. Flujo completo del usuario
@@ -658,6 +688,7 @@ App también guard contra `prefers-reduced-motion: reduce` antes de `startHints`
    - useFFTPiano: `playing=true` → `audio.currentTime=0`, `audio.play()`, RAF arranca.
    - El MP3 suena. Las teclas se iluminan en lavanda siguiendo el FFT.
    - App arranca `useMusicalNotes` → notas `♩ ♪ ♫ ♬` empiezan a flotar hacia arriba alrededor del avatar (rate 340ms, paleta lavanda/blanco).
+   - App pide `Screen Wake Lock` vía `useScreenWakeLock` → en mobile la pantalla no se apagará durante la canción.
 
 5. **Click durante modo piano**.
    - El click handler de App entra y comprueba `heroModeRef.current === 'piano'` → `return`.
@@ -670,6 +701,7 @@ App también guard contra `prefers-reduced-motion: reduce` antes de `startHints`
    - useFFTPiano: `playing=false` → cleanup → `audio.pause()`, RAF cancelado.
    - App detecta cambio de `heroMode` → llama `stopNotes()` → no se spawnan notas nuevas; las notas activas terminan su animación pendiente y se limpian solas.
    - Avatar: el hook recibe `whistle=false` → cleanup deja el avatar en `'normal'` → re-arranca el random loop (3s de warm-up + smile + bucle aleatorio).
+   - App libera el `Screen Wake Lock` (cleanup del effect).
    - CSS: piano fade-out, h1 reaparece (letras en cascada inversa con `--i-rev`), role vuelve.
    - El link `encore?` aparece bajo el role (animación 600ms con delay 400ms para entrar tras el role).
 
@@ -823,6 +855,29 @@ Las notas musicales spawnean cada 340ms a ritmo fijo, no en los onsets reales de
 - **Densidad estable**: a ritmo fijo el efecto se siente "ambiental"; sincronizado con onsets sería más espectacular en pasajes densos pero lo dejaría desierto en pasajes sostenidos (precisamente el caso que el `fillMode` del FFT compensa internamente para las teclas).
 - **Tunable por opción**: si en el futuro queremos densificar/relajar, basta pasar `start(avatarRef.current, { interval: 220 })` desde App.
 
+### 6.15 Helper `useLatestRef` para refs espejo
+
+Hay un patrón recurrente en el proyecto: guardar el último valor de un state o prop en un ref para que callbacks estables (event listeners, timers, promesas) lo lean sin ser dependencia del effect. Las primeras versiones lo escribían como mutación durante render:
+
+```ts
+const onTriggerRef = useRef(onTrigger)
+onTriggerRef.current = onTrigger   // ← antipatrón: mutate during render
+```
+
+Funciona en React 19 sync, pero es técnicamente "read+write durante render" — frágil ante futuras estrategias de scheduling. La solución mínima fue extraer un único helper [src/hooks/useLatestRef.ts](src/hooks/useLatestRef.ts) que hace la asignación en `useEffect` (post-commit):
+
+```ts
+export function useLatestRef<T>(value: T): RefObject<T> {
+  const ref = useRef(value)
+  useEffect(() => { ref.current = value })
+  return ref
+}
+```
+
+Aplicado a: `heroModeRef` (App), `modeRef` (Hero), `onStartRef` (KalamaricoAvatar), `onTriggerRef` y `onAudioFailedRef` (useFFTPiano). NO se aplica a refs que guardan estado interno o configuración (`busyRef`, `cancelRef`, `pianoDisabledRef`, etc.) — esos no son espejos.
+
+**Por qué es seguro**: los lectores de estos refs son siempre callbacks asíncronos que se ejecutan después del commit. Stale reads imposibles en la práctica.
+
 ---
 
 ## 7. Variables tunables (resumen)
@@ -935,8 +990,10 @@ Las notas musicales spawnean cada 340ms a ritmo fijo, no en los onsets reales de
 | `SocialLinks.tsx` | Iconos SVG inline + enlaces footer |
 | `useClickHints.tsx` | Hints "click anywhere" + ondas aleatorias antes del primer gesture |
 | `useFFTPiano.ts` | AudioContext + Analyser + RAF + onset detection |
+| `useLatestRef.ts` | Espeja state/prop en un ref con asignación post-commit (vía useEffect) |
 | `useMusicalNotes.tsx` | Notas musicales flotantes alrededor del avatar durante modo piano |
 | `usePixelParticles.tsx` | Bursts de partículas pixel art |
+| `useScreenWakeLock.ts` | Mantiene la pantalla despierta durante el modo piano (Wake Lock API) |
 | `global.css` | Tokens, layout, hero, piano, animaciones, reduced-motion |
 
 ---

@@ -13,6 +13,8 @@ import {
 } from './hooks/usePixelParticles'
 import { useMusicalNotes } from './hooks/useMusicalNotes'
 import { useClickHints } from './hooks/useClickHints'
+import { useLatestRef } from './hooks/useLatestRef'
+import { useScreenWakeLock } from './hooks/useScreenWakeLock'
 
 const PALETTE_BY_ANIM = new WeakMap<AvatarAnimation, ParticlePalette>([
   [ANIMATIONS.blink, 'cyan'],
@@ -38,9 +40,14 @@ function App() {
   const hintsDisabledRef = useRef(false)
 
   // Espejo del state para que el click handler global no se re-instale en
-  // cada cambio de modo (mismo patrón que `modeRef` en Hero).
-  const heroModeRef = useRef<HeroMode>(heroMode)
-  heroModeRef.current = heroMode
+  // cada cambio de modo (mismo patrón que `modeRef` en Hero). La asignación
+  // se hace en useEffect (vía useLatestRef), no durante render.
+  const heroModeRef = useLatestRef(heroMode)
+
+  // Mantiene la pantalla despierta durante el modo piano (sobre todo en
+  // mobile, donde el screen-off cortaría la canción a mitad). Hook no-op
+  // si el browser no expone `navigator.wakeLock`.
+  useScreenWakeLock(heroMode === 'piano')
 
   const onAnimationStart = useCallback(
     (anim: AvatarAnimation) => {

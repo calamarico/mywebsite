@@ -141,6 +141,8 @@ export function KalAmaricoIntro({ onComplete, style, className }: KalAmaricoIntr
           position: relative;
           overflow: hidden;
           font-family: 'Press Start 2P', monospace;
+          user-select: none;
+          -webkit-user-select: none;
         }
 
         /* Terminal line */

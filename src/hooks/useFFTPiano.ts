@@ -1,4 +1,5 @@
 import { type RefObject, useEffect, useRef, useState } from 'react'
+import { useLatestRef } from './useLatestRef'
 
 export interface Band {
   keys: number[]
@@ -44,10 +45,10 @@ export function useFFTPiano({
   const audioCtxRef = useRef<AudioContext | null>(null)
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
-  const onTriggerRef = useRef(onTrigger)
-  onTriggerRef.current = onTrigger
-  const onAudioFailedRef = useRef(onAudioFailed)
-  onAudioFailedRef.current = onAudioFailed
+  // Mirrors de los callbacks: el RAF loop / unlock los leen sin ser
+  // dependencia del effect (asignación post-commit vía useLatestRef).
+  const onTriggerRef = useLatestRef(onTrigger)
+  const onAudioFailedRef = useLatestRef(onAudioFailed)
   // One-shot: el callback de fallo se invoca como mucho una vez por sesión.
   const failureLoggedRef = useRef(false)
 
