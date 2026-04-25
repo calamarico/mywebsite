@@ -291,6 +291,7 @@ Las blancas en grid `repeat(29, 1fr)`. Las negras en `position: absolute` con su
 
 #### Estados visuales
 
+- **Fallboard**: pseudo-elemento `.hero-piano::before` que renderiza la lengüeta oscura sobre las teclas (como en pianos reales). Gradiente `#2d2632 → #181519`, ligero overhang lateral (-4px), esquinas superiores redondeadas. Hereda la opacidad del padre, así que aparece y desaparece junto con el piano.
 - **Base**: blancas con gradiente crema (`#f8f8f0 → #e8e8d8`), borde gris fino, sombra suave; negras con gradiente oscuro (`#222 → #444`) y sombra más profunda.
 - **Pulsada (`data-pressed="true"`)**: blanca pasa a `#f5d8ff → var(--accent)` con glow lavanda; negra pasa a `#a770cf → #5e3a7a`. `transform: translateY(2px)` simula la pulsación.
 - **Modo piano activo**: opacidad 1, scale 1, transition 420ms.

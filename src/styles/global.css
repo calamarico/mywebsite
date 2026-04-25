@@ -435,6 +435,30 @@ img { display: block; max-width: 100%; }
   transition-delay: var(--piano-entry-delay);
 }
 
+/* Fallboard: la lengüeta oscura sobre las teclas que tienen los pianos
+   reales. Pseudo-elemento sobre el .hero-piano, ligero overhang lateral
+   y esquinas superiores redondeadas. Aporta presencia de instrumento
+   real sin tocar la geometría de las teclas. Hereda opacidad del padre,
+   así que se desvanece junto al piano cuando salimos a modo texto. */
+.hero-piano::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  top: -8px;
+  height: 7px;
+  background: linear-gradient(
+    180deg,
+    #2d2632 0%,
+    #181519 100%
+  );
+  border-radius: 5px 5px 0 0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
 .hero-piano__whites {
   display: grid;
   grid-template-columns: repeat(var(--piano-keys), 1fr);
