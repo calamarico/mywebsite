@@ -185,9 +185,11 @@ Núcleo de la lógica. Gestiona:
 #### State
 
 - `mode: 'text' | 'intro' | 'piano'` — qué renderiza el hero (h1, intro o piano).
+- `encoreAvailable: boolean` — se vuelve `true` cuando la canción termina por primera vez (sin fallo de audio). Mientras `mode === 'text'`, renderiza el link `encore?` bajo el role para permitir replays.
 - `hasInteractedRef` — flag que se vuelve `true` tras el primer click/keydown global. **Bloquea el modo intro/piano** hasta que el usuario haya interactuado (sin gesture el navegador no permite reproducir audio).
 - `ignoreNextTitleEnterRef` — flag temporal de 600ms tras `exitPianoMode` que ignora el primer `mouseenter` en el h1 (evita disparar una animación del avatar por el cursor estacionario sobre el que las letras emergen al volver a modo texto).
-- `pianoDisabledRef` — flag persistente de sesión. Se vuelve `true` en dos casos: (a) el hook de audio reporta un fallo definitivo; (b) el modo piano completa un ciclo (la canción termina). En ambos, **bloquea para siempre** la entrada al modo intro/piano hasta recargar la página.
+- `pianoDisabledRef` — flag persistente de sesión. Se vuelve `true` en dos casos: (a) el hook de audio reporta un fallo definitivo; (b) el modo piano completa un ciclo. **Bloquea el flujo automático del intro** (primer gesture → intro → piano). El replay manual vía `encore?` salta este guard porque entra directamente al modo piano.
+- `audioFailedRef` — distinción específica del fallo de audio. Si es `true`, el link `encore?` no se renderiza ni `handleEncoreClick` hace nada — un audio que falló no se puede recuperar in-page.
 - `modeRef` — espejo del state `mode` para que callbacks estables (como `handleAudioFailed`) consulten el modo actual sin ser dependencia.
 
 #### Eventos
@@ -195,8 +197,9 @@ Núcleo de la lógica. Gestiona:
 - **`window.addEventListener('click' | 'keydown')`** registrado una sola vez. Al primer evento marca `hasInteractedRef = true`, llama `startIntro()`, y se desregistra.
 - **`onMouseEnter` del h1** → `handleTitleEnter`: dispara la animación random del avatar (`onTitleHover`). **No afecta al modo** — el hover es solo para el avatar.
 - **`onComplete` del `<KalAmaricoIntro>`** → `handleIntroComplete`: ~17s después del montaje del intro, transiciona a `mode = 'piano'`. Si en ese intervalo el audio falló (`pianoDisabledRef = true`), vuelve a `'text'` en su lugar.
-- **`onAudioEnded` del `<HeroPiano>`** → `exitPianoMode`: única ruta de salida del modo piano. Vuelve a texto y marca `pianoDisabledRef = true`.
-- **`onAudioFailed` del `<HeroPiano>`** → `handleAudioFailed`: si el hook reporta fallo definitivo (unlock o `audio.play()` rechaza), marca `pianoDisabledRef = true` y, si estábamos en intro o piano, sale a texto inmediatamente.
+- **`onAudioEnded` del `<HeroPiano>`** → `exitPianoMode`: única ruta de salida del modo piano. Vuelve a texto, marca `pianoDisabledRef = true`, y si no hubo fallo de audio activa `encoreAvailable = true` para mostrar el replay.
+- **`onAudioFailed` del `<HeroPiano>`** → `handleAudioFailed`: si el hook reporta fallo definitivo (unlock o `audio.play()` rechaza), marca `pianoDisabledRef = true` Y `audioFailedRef = true`, y si estábamos en intro o piano, sale a texto inmediatamente. **No** activa `encoreAvailable`.
+- **`onClick` del link `encore?`** → `handleEncoreClick`: replay manual. Llama a `e.stopPropagation()` (para que el handler global de App no dispare `surprised`), comprueba que el audio no falló y que `mode === 'text'`, y hace `setMode('piano')` directamente — saltándose la intro de 17s.
 
 > **El hover sobre el piano no hace nada** — durante el modo piano el usuario no puede salir manualmente. El piano corre hasta que la canción termina y entonces vuelve a texto definitivamente.
 
@@ -227,6 +230,8 @@ const startIntro = () => {
     <HeroPiano playing={mode === 'piano'} ... />
   </div>
   <p class="hero-role" data-reveal="3">Senior Frontend Developer</p>
+  {/* solo si encoreAvailable && mode === 'text' */}
+  <button class="hero-encore">encore?</button>
 </div>
 ```
 
@@ -661,14 +666,23 @@ App también guard contra `prefers-reduced-motion: reduce` antes de `startHints`
 
 6. **Canción terminada**.
    - El `<audio>` dispara `onEnded` → `exitPianoMode`.
-   - `setMode('text')`, marca `pianoDisabledRef = true` (modo piano deshabilitado para el resto de la sesión), activa `ignoreNextTitleEnterRef` (600ms).
+   - `setMode('text')`, marca `pianoDisabledRef = true` (bloquea el flujo automático del intro), activa `setEncoreAvailable(true)` (no si hubo fallo de audio), activa `ignoreNextTitleEnterRef` (600ms).
    - useFFTPiano: `playing=false` → cleanup → `audio.pause()`, RAF cancelado.
    - App detecta cambio de `heroMode` → llama `stopNotes()` → no se spawnan notas nuevas; las notas activas terminan su animación pendiente y se limpian solas.
    - Avatar: el hook recibe `whistle=false` → cleanup deja el avatar en `'normal'` → re-arranca el random loop (3s de warm-up + smile + bucle aleatorio).
    - CSS: piano fade-out, h1 reaparece (letras en cascada inversa con `--i-rev`), role vuelve.
-   - **No se rearma el timer**. La sesión sigue en modo texto normal y ya no hay más ciclos de piano.
+   - El link `encore?` aparece bajo el role (animación 600ms con delay 400ms para entrar tras el role).
 
-> El modo piano ocurre **una sola vez por sesión**. El usuario lo experimenta como un easter-egg que arranca con el primer click, tras una intro narrativa de ~17s, y dura lo que dure la canción. Cuando termina, la página vuelve a ser un hero estático normal hasta que se recargue.
+7. **Click en `encore?` (replay manual)**.
+   - `handleEncoreClick`: `e.stopPropagation()` evita que el click handler de App dispare `surprised`.
+   - `setMode('piano')` directo — salta la intro de 17s.
+   - El link se desmonta inmediatamente (condicional a `mode === 'text'`).
+   - useFFTPiano: `playing=true` → arranca audio + RAF como en el primer pase.
+   - Avatar pasa a whistle, notas musicales arrancan. Same flow que el paso 4, sin intro narrativa.
+   - Cuando la canción termine, vuelve al paso 6 → encore reaparece. Replays ilimitados.
+   - **No se rearma el timer**. La sesión sigue en modo texto + link `encore?` visible. El flujo automático (intro → piano) ya no se reactiva, pero el replay manual sí.
+
+> El primer ciclo del modo piano (intro narrativa + canción completa) ocurre **una sola vez por sesión**. Tras el primer ciclo, el link `encore?` permite replays ilimitados sin la intro.
 
 ### Rama alternativa — fallo de audio
 
@@ -676,9 +690,10 @@ Si en cualquier punto el hook detecta un fallo definitivo (unlock o `audio.play(
 
 1. `notifyFailure` loguea un único `console.warn` con la razón.
 2. Se invoca `onAudioFailed` (idempotente).
-3. Hero marca `pianoDisabledRef = true` y sale a modo texto si estaba en intro o piano.
+3. Hero marca `pianoDisabledRef = true` Y `audioFailedRef = true` y sale a modo texto si estaba en intro o piano.
 4. A partir de aquí, ningún `startIntro` arranca el intro (guard) y ningún `handleIntroComplete` salta a piano.
-5. El usuario ve la página en modo texto normal hasta el final de la sesión. Recargar la página es la única forma de reintentarlo.
+5. **El link `encore?` no aparece** — `exitPianoMode` no se llega a invocar y aunque se invocara, el guard `!audioFailedRef.current` lo bloquea.
+6. El usuario ve la página en modo texto normal hasta el final de la sesión. Recargar la página es la única forma de reintentarlo.
 
 ---
 
@@ -741,25 +756,30 @@ Fix: un flag de un solo disparo, válido 600ms. El primer `mouseenter` tras `exi
 
 Hacer hover sobre el h1 dispara la animación random del avatar pero **no toca el modo** — la transición a intro/piano depende solo del primer gesture global y luego del `onComplete` del intro.
 
-### 6.10 El modo piano se activa una sola vez por sesión
+### 6.10 La intro se ve una sola vez; los replays vienen sin intro vía `encore?`
 
-Decisión: el modo piano es un easter-egg one-shot. Se activa una vez (tras el primer gesture y la intro de ~17s) y, cuando la canción termina (o falla el audio), queda deshabilitado para el resto de la sesión.
+Decisión: el primer ciclo del modo piano (intro narrativa + canción) ocurre una sola vez por sesión. Tras la canción, aparece bajo el role un link sutil `encore?` que permite **replays directos al modo piano**, saltándose la intro.
 
 Razones:
-- **No es interactivo**: no es un reproductor de música; es una pequeña pieza ambiental. Una vez vista, no aporta valor repetirla.
-- **No se puede salir manualmente**: el hover sobre el piano no hace nada. La única forma de "volver" es esperar a que la canción acabe.
-- **No vuelve solo**: tras terminar, no hay más entradas a intro ni piano. El usuario ve la página normal hasta recargar.
+- **La intro es narrativa, no funcional**: introduce el concierto, pero solo tiene sentido la primera vez. Repetirla cada replay es ruido.
+- **El usuario que pide encore quiere la música**: el patrón está bien establecido en conciertos. La conexión con la intro ("Because the concert... Is about to start!!!! Ohhh Yess!") hace que la palabra `encore?` se sienta natural sin explicar nada.
+- **El replay es opt-in y manual**: no se reactiva automáticamente. El usuario elige hacer click otra vez.
 
-El flag `pianoDisabledRef` (en Hero) se vuelve `true` en dos casos: (a) `exitPianoMode` (canción terminada), (b) `handleAudioFailed` (fallo de audio). Los guards de `startIntro` y `handleIntroComplete` impiden cualquier reprogramación futura. La diferencia entre ambos casos:
+Mecánica:
+- `pianoDisabledRef` sigue **bloqueando el flujo automático** (primer gesture → intro → piano). Garantiza que tras el primer ciclo no se relance solo.
+- `audioFailedRef` separa el caso "fallo de audio" del caso "canción terminada". Solo el segundo expone el link `encore?`.
+- `handleEncoreClick` salta el guard de `pianoDisabledRef` porque NO pasa por `startIntro` — entra directamente con `setMode('piano')`.
 
-| Caso | ¿Llegó a verse el piano? | Tras el bloqueo |
+Casos:
+
+| Caso | ¿Llegó a verse el piano? | Tras el ciclo |
 | --- | --- | --- |
-| Canción terminada | Sí, ciclo completo | Modo texto normal hasta recargar |
-| Fallo de audio | A veces (race del primer `start()`); si pasa, se sale inmediatamente | Modo texto normal hasta recargar; un `console.warn` documenta la razón |
+| Canción terminada | Sí, ciclo completo | Modo texto + link `encore?` visible. Replays ilimitados. |
+| Fallo de audio | A veces (race del primer `start()`); si pasa, se sale inmediatamente | Modo texto normal sin link. `console.warn` documenta la razón. Recargar es la única vía. |
 
 Trade-offs aceptados:
-- **Sin UI de error**: si el audio falla, el usuario nunca lo nota — la página parece no tener la feature. Aceptable: el modo piano es un easter-egg, no un funcional crítico.
-- **Sin reintento**: ni el ciclo completado ni el fallo se pueden "rebajar". Recargar es el camino. Mantiene la lógica simple.
+- **Sin UI de error visible**: si el audio falla, el usuario nunca lo nota — la página parece no tener la feature. Aceptable: el modo piano es un easter-egg, no un funcional crítico.
+- **El replay nunca incluye intro**: aunque sea pedagógicamente útil para volver a "leer" el typewriter, dejarlo fuera mantiene el replay rápido y respeta que ya se vio.
 - **Un único `console.warn` por sesión** ante fallos: idempotente vía `failureLoggedRef` en el hook.
 
 ### 6.11 Intro narrativa en lugar de timer ciego
@@ -845,12 +865,20 @@ Las notas musicales spawnean cada 340ms a ritmo fijo, no en los onsets reales de
 }
 ```
 
+`.hero-encore` (replay link):
+- `padding: 6px 14px`
+- `font-size: clamp(0.78rem, 1.1vw, 0.875rem)`
+- `color: var(--accent)` (lavanda)
+- `opacity: 0.7` base → `1` en hover
+- Animación de entrada: `hero-encore-enter` 600ms con delay 400ms (espera a que el role re-aparezca tras el piano fade-out)
+
 ### En JS
 
 `Hero.tsx`:
 - `TITLE` (`'KALAMARICO'`)
 - `ROLE` (`'Senior Frontend Developer'`)
 - `AUDIO_SRC` (`'/audio/piano.mp3'`)
+- Texto del replay link: hardcoded `'encore?'` en el JSX
 
 `KalAmaricoIntro.tsx`:
 - `LINES[]`: textos, velocidad de tipeo (`spd`) y pausa de lectura (`read`) por línea.

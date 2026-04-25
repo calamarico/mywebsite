@@ -19,6 +19,9 @@ interface HeroProps {
 
 export function Hero({ onTitleHover, onModeChange }: HeroProps) {
   const [mode, setMode] = useState<HeroMode>('text')
+  // Una vez la canción ha terminado al menos una vez, el link "encore?"
+  // se muestra bajo el role para permitir replays en modo texto.
+  const [encoreAvailable, setEncoreAvailable] = useState(false)
   // Guard: el modo intro/piano no debe activarse hasta que el usuario haya
   // interactuado al menos una vez (click o keydown). Sin gesture el navegador
   // bloquea el audio y entraríamos al modo piano sin música.
@@ -30,8 +33,12 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
   // durante 600ms.
   const ignoreNextTitleEnterRef = useRef(false)
   // Guard persistente de sesión: se vuelve true si el audio falla o si el
-  // modo piano completa un ciclo. A partir de ahí, ningún intro/piano arranca.
+  // modo piano completa un ciclo. Bloquea el flujo automático del intro
+  // (primer gesture → intro → piano).
   const pianoDisabledRef = useRef(false)
+  // Distinción específica del fallo de audio. Si es true, el link "encore?"
+  // NO se muestra ni replay es posible.
+  const audioFailedRef = useRef(false)
   // Espejo de `mode` para que callbacks estables consulten el state actual
   // sin ser dependencia.
   const modeRef = useRef<HeroMode>(mode)
@@ -65,23 +72,38 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
 
   // Si el hook de audio reporta fallo definitivo, deshabilitamos el modo piano
   // para el resto de la sesión. Si estábamos en intro o piano, salimos a text.
+  // Marcamos también `audioFailedRef` para que el link "encore?" NO se ofrezca.
   const handleAudioFailed = useCallback(() => {
     pianoDisabledRef.current = true
+    audioFailedRef.current = true
     if (modeRef.current === 'piano' || modeRef.current === 'intro') {
       setMode('text')
     }
   }, [])
 
   // Salida del modo piano (solo se dispara cuando la canción termina).
-  // Tras el primer ciclo, el modo piano queda deshabilitado para el resto
-  // de la sesión.
+  // Bloquea el flujo automático del intro y, si la canción terminó normal
+  // (no por fallo de audio), expone el link "encore?" para replays.
   const exitPianoMode = useCallback(() => {
     setMode('text')
     pianoDisabledRef.current = true
+    if (!audioFailedRef.current) {
+      setEncoreAvailable(true)
+    }
     ignoreNextTitleEnterRef.current = true
     window.setTimeout(() => {
       ignoreNextTitleEnterRef.current = false
     }, 600)
+  }, [])
+
+  // Replay manual: salta la intro y entra directo a piano. Llamado al click
+  // del link "encore?". El stopPropagation evita que el handler global de
+  // App dispare `surprised` justo antes de la transición.
+  const handleEncoreClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (audioFailedRef.current) return
+    if (modeRef.current !== 'text') return
+    setMode('piano')
   }, [])
 
   // Primera interacción (click/keydown global): arranca el intro.
@@ -150,6 +172,16 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
         />
       </div>
       <p className="hero-role" data-reveal="3">{ROLE}</p>
+      {encoreAvailable && mode === 'text' && (
+        <button
+          type="button"
+          className="hero-encore"
+          onClick={handleEncoreClick}
+          aria-label="Play the concert again"
+        >
+          encore?
+        </button>
+      )}
     </div>
   )
 }
