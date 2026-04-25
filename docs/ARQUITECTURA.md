@@ -497,7 +497,15 @@ Maneja el state de fase (`'typing' | 'countdown' | 'letsgo'`), el texto actualme
 
 #### Posicionamiento en Hero
 
-Se monta dentro del `.hero-stage` envuelto en un `.hero-intro-slot` con `position: absolute; top: 50%; transform: translateY(-50%)`. Ocupa el ancho del stage (que coincide con el del h1) y mantiene su altura fija de 200px. Con `pointer-events: none` para que el cursor no interactúe.
+Se monta dentro del `.hero-stage` envuelto en un `.hero-intro-slot` con `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%)`. La anchura es `min(calc(100vw - 24px), 720px)` — rompe la inline-block trap del `.hero-stage` (que sigue la anchura del h1, demasiado estrecha en mobile) y se ancla al centro horizontal. Mantiene altura fija de 200px y `pointer-events: none`.
+
+#### Tipografía responsive
+
+`.kala-terminal` usa `font-size: clamp(10px, 2.4vw, 18px)` y `.kala-letsgo` `clamp(13px, 3vw, 22px)`. El cursor está en unidades `em` (`width: 0.78em; height: 1em`) para escalar con la fuente.
+
+Las líneas largas (54-55 chars) no caben aunque el slot llegue a 720px; se permite wrap con `white-space: pre-wrap; word-break: break-word`. El typewriter en mobile se siente como un terminal real cuando una frase es más larga que la anchura disponible: la línea continúa abajo en lugar de cortarse.
+
+> Detalle técnico: `.kala-terminal` es flex item del `.kala-intro` (centrado vertical y horizontal). Necesita `min-width: 0` para que el `max-width: 100%` se respete y el wrap suceda — sin esa regla, el flex item por defecto crece a la anchura intrínseca del contenido y desborda.
 
 ### 4.11 Notas musicales — `useMusicalNotes.tsx`
 

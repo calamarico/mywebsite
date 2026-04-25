@@ -222,13 +222,15 @@ img { display: block; max-width: 100%; }
   pointer-events: none;
 }
 
-/* Slot del intro: ocupa el área del h1 mientras está activo. */
+/* Slot del intro. Se ancla al centro horizontal del .hero-stage (que es
+   inline-block y heredaría su anchura del h1, demasiado estrecho en mobile)
+   y rompe esa caja con una anchura propia limitada a viewport. */
 .hero-intro-slot {
   position: absolute;
-  left: 0;
-  right: 0;
+  left: 50%;
   top: 50%;
-  transform: translateY(-50%);
+  width: min(calc(100vw - 24px), 720px);
+  transform: translate(-50%, -50%);
   z-index: 1;
   pointer-events: none;
 }

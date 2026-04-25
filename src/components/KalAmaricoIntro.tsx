@@ -130,7 +130,9 @@ export function KalAmaricoIntro({ onComplete, style, className }: KalAmaricoIntr
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
         .kala-intro {
-          background: #000;
+          /* Transparente para que se vea el bg de la página (incluido el
+             radial-gradient sobre <body>) en lugar del rectángulo negro. */
+          background: transparent;
           width: 100%;
           height: 200px;
           display: flex;
@@ -143,11 +145,19 @@ export function KalAmaricoIntro({ onComplete, style, className }: KalAmaricoIntr
 
         /* Terminal line */
         .kala-terminal {
-          display: flex;
-          align-items: center;
-          font-size: 18px;
+          font-size: clamp(10px, 2.4vw, 18px);
           color: #fff;
-          white-space: pre;
+          text-align: center;
+          /* pre-wrap + break-word: las líneas largas wrappean en mobile como
+             un terminal real cuando llegan al borde, en lugar de cortarse. */
+          white-space: pre-wrap;
+          word-break: break-word;
+          /* min-width: 0 fuerza al flex item a respetar el max-width del padre
+             (el default min-width: auto = ancho del contenido haría overflow). */
+          min-width: 0;
+          max-width: 100%;
+          padding: 0 8px;
+          box-sizing: border-box;
           transition: opacity 0.3s;
           opacity: ${isLetsGo ? 0 : 1};
         }
@@ -160,11 +170,11 @@ export function KalAmaricoIntro({ onComplete, style, className }: KalAmaricoIntr
           color: #fff;
         }
 
-        /* Blinking cursor */
+        /* Blinking cursor — em-relative para escalar con la fuente */
         .kala-cursor {
           display: inline-block;
-          width: 14px;
-          height: 18px;
+          width: 0.78em;
+          height: 1em;
           background: #fff;
           margin-left: 2px;
           vertical-align: middle;
@@ -182,7 +192,7 @@ export function KalAmaricoIntro({ onComplete, style, className }: KalAmaricoIntr
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          font-size: 22px;
+          font-size: clamp(13px, 3vw, 22px);
           color: #fff;
           text-align: center;
           white-space: nowrap;
