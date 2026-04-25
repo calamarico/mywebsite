@@ -29,9 +29,15 @@ interface HeroPianoProps {
   playing?: boolean
   audioSrc?: string
   onHoverOut?: () => void
+  onAudioEnded?: () => void
 }
 
-export function HeroPiano({ playing = true, audioSrc, onHoverOut }: HeroPianoProps) {
+export function HeroPiano({
+  playing = true,
+  audioSrc,
+  onHoverOut,
+  onAudioEnded,
+}: HeroPianoProps) {
   const whiteRefs = useRef<(HTMLDivElement | null)[]>([])
   const blackRefs = useRef<(HTMLDivElement | null)[]>([])
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -87,7 +93,12 @@ export function HeroPiano({ playing = true, audioSrc, onHoverOut }: HeroPianoPro
       onPointerEnter={onHoverOut}
     >
       {audioSrc && (
-        <audio ref={audioRef} src={audioSrc} loop preload="auto" />
+        <audio
+          ref={audioRef}
+          src={audioSrc}
+          preload="auto"
+          onEnded={onAudioEnded}
+        />
       )}
       <div className="hero-piano__whites">
         {Array.from({ length: WHITE_COUNT }, (_, i) => (

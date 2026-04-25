@@ -122,6 +122,7 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
           playing={mode === 'piano'}
           audioSrc={AUDIO_SRC}
           onHoverOut={exitPianoMode}
+          onAudioEnded={exitPianoMode}
         />
       </div>
       <p className="hero-role" data-reveal="3">{ROLE}</p>
