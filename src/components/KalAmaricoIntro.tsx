@@ -141,6 +141,11 @@ export function KalAmaricoIntro({ onComplete, style, className }: KalAmaricoIntr
           position: relative;
           overflow: hidden;
           font-family: 'Press Start 2P', monospace;
+          /* Pixel font sin antialiasing — más nítido en hi-DPR. Evita que en
+             monitores grandes el texto se vea ligeramente blurry. */
+          -webkit-font-smoothing: none;
+          -moz-osx-font-smoothing: grayscale;
+          font-smooth: never;
           user-select: none;
           -webkit-user-select: none;
         }
@@ -157,8 +162,11 @@ export function KalAmaricoIntro({ onComplete, style, className }: KalAmaricoIntr
              un terminal real cuando llegan al borde, en lugar de cortarse. */
           white-space: pre-wrap;
           word-break: break-word;
-          /* min-width: 0 fuerza al flex item a respetar el max-width del padre
-             (el default min-width: auto = ancho del contenido haría overflow). */
+          /* width: 100% estabiliza el bloque dentro del flex centrado del
+             padre. Sin esto, cada char tipeado hacía crecer el bloque y el
+             flex lo re-centraba a píxeles fraccionarios — visible como
+             "temblor" del texto en monitores grandes / hi-DPR. */
+          width: 100%;
           min-width: 0;
           max-width: 100%;
           padding: 0 8px;

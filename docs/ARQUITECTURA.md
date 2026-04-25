@@ -540,6 +540,12 @@ Se monta dentro del `.hero-stage` envuelto en un `.hero-intro-slot` con `positio
 
 En desktop (slot hasta 1100px) las frases largas caben en una sola línea. En mobile no caben aunque la fuente esté reducida; se permite wrap con `white-space: pre-wrap; word-break: break-word`. El typewriter se siente como un terminal real cuando una frase es más larga que la anchura disponible: la línea continúa abajo en lugar de cortarse. El `line-height: 1.7` da suficiente aire entre líneas wrappeadas para mantener legibilidad.
 
+#### Estabilidad subpixel en hi-DPR
+
+`.kala-terminal` lleva `width: 100%` para que el bloque ocupe siempre toda la anchura del slot. Sin esto, cada char tipeado hacía crecer el bloque y el `display: flex; justify-content: center` del padre lo re-centraba a píxeles fraccionarios — visible como "temblor" del texto en monitores grandes con devicePixelRatio alto. Con width:100% el bloque está fijo y el texto reflows internamente vía `text-align: center` sin recálculos de posición.
+
+`.kala-intro` desactiva el font smoothing (`-webkit-font-smoothing: none; font-smooth: never; -moz-osx-font-smoothing: grayscale`) — Press Start 2P es una pixel font diseñada para tamaños enteros, y el antialiasing del browser en hi-DPR la hacía verse ligeramente blurry. Sin smoothing, el render es más nítido y fiel al espíritu pixel-art.
+
 #### Background
 
 `.kala-intro` es `background: transparent` (no rectángulo negro). Deja ver el `--bg` del `<body>` con su radial-gradient, integrando el intro visualmente con el resto de la página.
