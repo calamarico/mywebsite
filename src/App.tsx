@@ -12,6 +12,7 @@ import {
   type ParticlePalette,
 } from './hooks/usePixelParticles'
 import { useMusicalNotes } from './hooks/useMusicalNotes'
+import { useClickHints } from './hooks/useClickHints'
 
 const PALETTE_BY_ANIM = new WeakMap<AvatarAnimation, ParticlePalette>([
   [ANIMATIONS.blink, 'cyan'],
@@ -26,8 +27,15 @@ function App() {
   const avatarRef = useRef<HTMLSpanElement>(null)
   const { burst, container } = usePixelParticles()
   const { start: startNotes, stop: stopNotes, MusicalNotesLayer } = useMusicalNotes()
+  const { start: startHints, stop: stopHints, ClickHintsLayer } = useClickHints()
 
   const [heroMode, setHeroMode] = useState<HeroMode>('text')
+
+  // Una vez el usuario interactúa por primera vez (heroMode deja de ser
+  // 'text' al activar la intro), los click hints se desactivan
+  // permanentemente: ya no vuelven aunque el modo regrese a 'text' tras la
+  // canción.
+  const hintsDisabledRef = useRef(false)
 
   // Espejo del state para que el click handler global no se re-instale en
   // cada cambio de modo (mismo patrón que `modeRef` en Hero).
@@ -74,10 +82,28 @@ function App() {
     return () => stopNotes()
   }, [heroMode, startNotes, stopNotes])
 
+  // Click hints aleatorios mientras el usuario está en modo texto y aún no
+  // ha interactuado. Tras la primera transición fuera de 'text' (intro o
+  // piano), se desactivan para el resto de la sesión: ni vuelven al acabar
+  // la canción.
+  useEffect(() => {
+    if (heroMode !== 'text') {
+      hintsDisabledRef.current = true
+      stopHints()
+      return
+    }
+    if (hintsDisabledRef.current) return
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced) return
+    startHints(['.site-header', '.hero', '.site-footer'])
+    return () => stopHints()
+  }, [heroMode, startHints, stopHints])
+
   return (
     <>
       {container}
       <MusicalNotesLayer />
+      <ClickHintsLayer />
       <header className="site-header" data-reveal="1">
         <KalamaricoAvatar ref={avatarRef} state={state} size={64} />
         <span className="handle">@calamarico</span>

@@ -47,6 +47,7 @@ mywebsite/
 │   │   ├── KalamaricoAvatar.tsx # sprite + hook useKalamaricoAvatar (loop random + tryPlay)
 │   │   └── SocialLinks.tsx     # iconos SVG inline + enlaces footer
 │   ├── hooks/
+│   │   ├── useClickHints.tsx   # texto "click anywhere" + ondas aleatorias antes del primer click
 │   │   ├── useFFTPiano.ts      # AudioContext + Analyser + RAF + onset detection
 │   │   ├── useMusicalNotes.tsx # notas musicales flotantes alrededor del avatar durante modo piano
 │   │   └── usePixelParticles.tsx  # bursts de partículas pixel-art al disparar animaciones
@@ -564,11 +565,61 @@ useEffect(() => {
 
 #### Rate fijo, no sincronizado con FFT
 
-Las notas se spawnean a ritmo fijo (340ms) — no siguen los onsets reales del audio. Decisión consciente, ver §6.13.
+Las notas se spawnean a ritmo fijo (340ms) — no siguen los onsets reales del audio. Decisión consciente, ver §6.14.
 
 #### Reduced motion
 
 El hook trae sus propios keyframes inline, fuera del alcance del media query global. Por eso App añade un guard explícito antes de `startNotes`. Si el usuario tiene `prefers-reduced-motion: reduce`, no aparecen notas.
+
+### 4.12 Click hints — `useClickHints.tsx`
+
+Hook que muestra el texto **"click anywhere"** acompañado de ondas concéntricas expansivas en posiciones aleatorias del viewport, invitando al usuario a hacer click la primera vez. Devuelve `{ start, stop, ClickHintsLayer }`.
+
+#### API
+
+- `start(excludeSelectors: string[], opts?: ClickHintsOptions)` — programa un timer recursivo que spawnea un hint cada 0.9-1.7s en una posición válida.
+- `stop()` — cancela el timer y limpia los hints activos.
+- `ClickHintsLayer` — componente que portaliza a `document.body` los hints con sus estilos inline.
+
+#### Posicionamiento
+
+Cada spawn pide una posición:
+1. Lee `getBoundingClientRect()` de los selectores excluidos (`.site-header`, `.hero`, `.site-footer`).
+2. Genera un `(x, y)` aleatorio dentro del viewport con margen (40px del borde).
+3. Si cae dentro de cualquier rectángulo excluido + padding (24px), reintenta hasta 12 veces.
+4. Si no encuentra hueco, salta esa ronda (mobile estrecho puede tener pocos huecos).
+
+#### Visual
+
+Cada hint:
+- 3 ondas concéntricas (10px iniciales, escalan ×8 en 1.4s) con delay escalonado 0/220/440ms, color accent `#e0a0ff`.
+- Texto "click anywhere" en monospace 11px, color `rgba(255,255,255,0.62)`, posicionado 22px sobre el centro de las ondas.
+- Animación del texto: fade-in subiendo + fade-out subiendo (1.6s total).
+
+Auto-cleanup tras 1.6s + 100ms de buffer.
+
+#### Lifecycle en App
+
+```ts
+useEffect(() => {
+  if (heroMode !== 'text') {
+    hintsDisabledRef.current = true   // ← deshabilita permanentemente
+    stopHints()
+    return
+  }
+  if (hintsDisabledRef.current) return
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (reduced) return
+  startHints(['.site-header', '.hero', '.site-footer'])
+  return () => stopHints()
+}, [heroMode, startHints, stopHints])
+```
+
+Solo aparecen **antes del primer click** del usuario. Una vez `heroMode` deja de ser `'text'` (pasa a `'intro'` o `'piano'`), `hintsDisabledRef = true` para el resto de la sesión: aunque la canción termine y `heroMode` vuelva a `'text'`, los hints **no reaparecen** — el usuario ya ha visto la página.
+
+#### Reduced motion
+
+App también guard contra `prefers-reduced-motion: reduce` antes de `startHints`. Mismo patrón que `useMusicalNotes`.
 
 ---
 
@@ -578,12 +629,14 @@ El hook trae sus propios keyframes inline, fuera del alcance del media query glo
    - Reveal escalonado: header (80ms) → hero-stage (220ms) → role (360ms) → footer (500ms).
    - Avatar arranca su loop random tras un warm-up `smile` a los 3s.
    - Mensaje ASCII `KALAMARICO` en consola del navegador (easter egg).
+   - **Click hints** empiezan a aparecer aleatoriamente cada 0.9-1.7s: texto "click anywhere" + ondas expansivas color accent, en posiciones del viewport que no chocan con header / hero / footer.
    - Hero está esperando el primer gesture; `mode = 'text'`.
 
 2. **Primer gesture** (click o keydown en cualquier sitio).
    - Hero: `hasInteractedRef = true`, `startIntro()` cambia `mode` a `'intro'` (o a `'piano'` si reduced-motion).
    - useFFTPiano: `unlock` crea `AudioContext`, lo resume, hace play/pause silencioso del media element.
    - App: el click handler global dispara `tryPlay(surprised)` → avatar hace cara de sorpresa con burst naranja.
+   - App: detecta cambio de `heroMode` → marca `hintsDisabledRef = true` y para los click hints (no reaparecerán en esta sesión).
    - CSS reacciona a `data-mode='intro'`: letras del h1 caen en cascada, `Senior Frontend Developer` se desvanece. El componente `KalAmaricoIntro` emerge en el área del h1 y arranca su typewriter.
 
 3. **Hover sobre KALAMARICO** (durante text).
@@ -732,7 +785,16 @@ Durante el modo piano el avatar está silbando en bucle (8 frames whistle1/whist
 
 Implementación: un guard al inicio del click handler en App (`if (heroModeRef.current === 'piano') return`). Fuera del modo piano (texto e intro), el click sigue disparando `surprised` exactamente como antes. El ref espejo evita re-instalar el handler en cada cambio de modo.
 
-### 6.13 Notas con rate fijo, no sincronizadas con FFT
+### 6.13 Click hints solo antes del primer gesture
+
+Los click hints (texto + ondas) aparecen aleatoriamente sobre el viewport para invitar al usuario a hacer click la primera vez. Una vez ocurre el primer gesture (heroMode deja de ser `'text'`), `hintsDisabledRef = true` y **no reaparecen** aunque tras la canción el modo vuelva a `'text'`.
+
+Razones:
+- **Función pedagógica única**: los hints existen para que el usuario descubra que clickar dispara el easter-egg. Tras hacerlo, ya conoce la página; mostrarlos otra vez es ruido.
+- **Coherencia con el modo piano one-shot** (§6.10): la página solo tiene una "primera impresión" por sesión. Tras la canción, todo es estado normal post-experiencia.
+- **No molestar**: los hints son intencionalmente sutiles pero recurrentes; mantenerlos vivos sin propósito tras la interacción rompería la calma post-show.
+
+### 6.14 Notas con rate fijo, no sincronizadas con FFT
 
 Las notas musicales spawnean cada 340ms a ritmo fijo, no en los onsets reales del audio detectados por la FFT. Decisión consciente:
 
@@ -814,6 +876,14 @@ Las notas musicales spawnean cada 340ms a ritmo fijo, no en los onsets reales de
 - tamaño de la nota (14-28 px)
 - símbolos `♩ ♪ ♫ ♬`, paleta `#ffffff / #e0a0ff / #c8b8ff / #f0d0ff`
 
+`useClickHints.tsx` (constantes hardcoded, sobrescribibles vía `opts` en `start`):
+- `text` (`'click anywhere'`)
+- `intervalMs` (`[900, 1700]` — gap aleatorio entre hints)
+- `excludePadding` (24 px de margen alrededor de los rectángulos excluidos)
+- `viewportPadding` (40 px de margen al borde del viewport)
+- `HINT_DURATION` (1600 ms — vida total del hint)
+- 3 ondas con delay 0/220/440ms, escalan de 10px → ×8
+
 `KalamaricoAvatar.tsx` (constantes hardcoded):
 - `RANDOM_POOL[]` (animaciones del loop random)
 - Tiempos de cada animación dentro de `ANIMATIONS`
@@ -833,6 +903,7 @@ Las notas musicales spawnean cada 340ms a ritmo fijo, no en los onsets reales de
 | `KalAmaricoIntro.tsx` | Intro terminal animado (~17s) que precede al modo piano |
 | `KalamaricoAvatar.tsx` | Sprite, `useKalamaricoAvatar` (loop random + tryPlay) |
 | `SocialLinks.tsx` | Iconos SVG inline + enlaces footer |
+| `useClickHints.tsx` | Hints "click anywhere" + ondas aleatorias antes del primer gesture |
 | `useFFTPiano.ts` | AudioContext + Analyser + RAF + onset detection |
 | `useMusicalNotes.tsx` | Notas musicales flotantes alrededor del avatar durante modo piano |
 | `usePixelParticles.tsx` | Bursts de partículas pixel art |
