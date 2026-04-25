@@ -26,8 +26,9 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
   const hasInteractedRef = useRef(false)
   // Guard: tras salir del modo piano, las letras de h1 emergen donde estaba
   // el cursor del usuario. El browser dispara mouseenter en el h1 (cursor
-  // estacionario, elemento aparece debajo) y `handleTitleEnter` cancelaría
-  // el timer recién armado. Ignoramos el primer mouseenter por 600ms.
+  // estacionario, elemento aparece debajo) y dispararía una animación del
+  // avatar sin que el usuario haya hecho nada. Ignoramos el primer mouseenter
+  // durante 600ms.
   const ignoreNextTitleEnterRef = useRef(false)
 
   useEffect(() => {
@@ -65,20 +66,15 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
     }
   }, [scheduleIdle])
 
-  // Al entrar con el puntero en el h1 cancelamos la cuenta atrás; al salir
-  // la rearmamos. Nada más en la página afecta al timer.
+  // El hover sobre el h1 dispara la animación random del avatar pero NO
+  // afecta al timer de idle.
   const handleTitleEnter = useCallback(() => {
     if (ignoreNextTitleEnterRef.current) {
       ignoreNextTitleEnterRef.current = false
       return
     }
-    window.clearTimeout(idleTimerRef.current)
     onTitleHover?.()
   }, [onTitleHover])
-
-  const handleTitleLeave = useCallback(() => {
-    scheduleIdle()
-  }, [scheduleIdle])
 
   const exitPianoMode = useCallback(() => {
     setMode('text')
@@ -99,7 +95,6 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
         <h1
           className="hero-title"
           onMouseEnter={handleTitleEnter}
-          onMouseLeave={handleTitleLeave}
           aria-label={TITLE}
         >
           {TITLE_LETTERS.map((ch, i) => (

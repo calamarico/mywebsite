@@ -177,15 +177,14 @@ Núcleo de la lógica. Gestiona:
 
 - `mode: 'text' | 'piano'` — qué renderiza el hero (h1 o piano).
 - `hasInteractedRef` — flag que se vuelve `true` tras el primer click/keydown global. **Bloquea el modo piano** hasta que el usuario haya interactuado (sin gesture el navegador no permite reproducir audio).
-- `ignoreNextTitleEnterRef` — flag temporal de 600ms tras `exitPianoMode` que ignora el primer `mouseenter` en el h1 (evita el bug del cursor estacionario sobre el que las letras emergen al volver a modo texto).
+- `ignoreNextTitleEnterRef` — flag temporal de 600ms tras `exitPianoMode` que ignora el primer `mouseenter` en el h1 (evita disparar una animación del avatar por el cursor estacionario sobre el que las letras emergen al volver a modo texto).
 - `idleTimerRef` — handle del `setTimeout` de 12s.
 
 #### Eventos
 
 - **`window.addEventListener('click' | 'keydown')`** registrado una sola vez. Al primer evento marca `hasInteractedRef = true`, llama `scheduleIdle()`, y se desregistra.
-- **`onMouseEnter` del h1** → `handleTitleEnter`: cancela el timer (excepto cuando el flag de ignore está activo).
-- **`onMouseLeave` del h1** → `handleTitleLeave`: rearma el timer.
-- **`onPointerEnter` del piano** → `exitPianoMode`: vuelve a modo texto.
+- **`onMouseEnter` del h1** → `handleTitleEnter`: dispara la animación random del avatar (`onTitleHover`). **No afecta al timer** — el contador sigue corriendo aunque hagas hover sobre el título.
+- **`onPointerEnter` del piano** → `exitPianoMode`: vuelve a modo texto y rearma el timer.
 - **`onEnded` del `<audio>`** → también `exitPianoMode`: cuando la canción acaba, se sale.
 
 #### `scheduleIdle`
@@ -458,14 +457,10 @@ El hook `useKalamaricoAvatar` también consulta `matchMedia('(prefers-reduced-mo
    - App: el click handler global dispara `tryPlay(surprised)` → avatar hace cara de sorpresa con burst naranja.
 
 3. **Hover sobre KALAMARICO**.
-   - `handleTitleEnter`: cancela el timer.
-   - App: `onTitleHover` dispara `tryPlayRandom()` → avatar hace una animación aleatoria con burst de su paleta.
-   - Mientras esté el cursor sobre el h1, el modo piano nunca se activa.
+   - `handleTitleEnter`: dispara `onTitleHover` → `tryPlayRandom()` → avatar hace una animación aleatoria con burst de su paleta.
+   - **El timer no se afecta** — sigue corriendo aunque el cursor esté sobre el h1.
 
-4. **Mouse fuera del h1**.
-   - `handleTitleLeave`: rearma el timer (12s nuevos).
-
-5. **12s sin interacción → modo piano**.
+4. **12s desde el primer gesture → modo piano**.
    - `setMode('piano')` → fluye via `onModeChange` a App → `heroMode = 'piano'`.
    - CSS reacciona a `data-mode='piano'` en `.hero`:
      - Letras de `KALAMARICO` caen en cascada (45ms stagger).
@@ -476,13 +471,13 @@ El hook `useKalamaricoAvatar` también consulta `matchMedia('(prefers-reduced-mo
    - useFFTPiano: `playing=true` → `audio.currentTime=0`, `audio.play()`, RAF arranca.
    - El MP3 suena. Las teclas se iluminan en lavanda siguiendo el FFT.
 
-6. **Click durante modo piano**.
+5. **Click durante modo piano**.
    - El click handler de App dispara `tryPlay(surprised)`.
    - `tryPlay` no consulta `cancelRef`, solo `busyRef`. Como el loop está pausado, `busyRef = false` → `surprised` se ejecuta normalmente.
    - Burst naranja aparece sobre el avatar.
    - Tras 900ms, state vuelve a `'normal'` → display override → `grimace` de nuevo.
 
-7. **Hover sobre el piano** o **canción terminada**.
+6. **Hover sobre el piano** o **canción terminada**.
    - Ambos disparan `exitPianoMode` (callback compartido entre `onPointerEnter` y `onEnded`).
    - `setMode('text')`, activa `ignoreNextTitleEnterRef` (600ms).
    - useFFTPiano: `playing=false` → cleanup → `audio.pause()`, RAF cancelado.
@@ -490,8 +485,8 @@ El hook `useKalamaricoAvatar` también consulta `matchMedia('(prefers-reduced-mo
    - CSS: piano fade-out, h1 reaparece (letras en cascada inversa con `--i-rev`), role vuelve.
    - `scheduleIdle()` rearma el timer de 12s.
 
-8. **Sin interacción tras volver del piano**.
-   - El timer corre 12s y vuelve a entrar al modo piano.
+7. **Sin interacción tras volver del piano**.
+   - El timer corre 12s y vuelve a entrar al modo piano (el hover sobre el h1 no lo afecta).
 
 ---
 
@@ -542,9 +537,13 @@ Con el guard, el contador idle **no arranca** hasta el primer click/keydown. Eso
 
 ### 6.8 `ignoreNextTitleEnterRef`
 
-Bug sutil: al pasar de modo piano a texto (vía hover en piano), las letras del h1 emergen *exactamente donde estaba el cursor del usuario*. Aunque el cursor esté estacionario, el navegador dispara `mouseenter` en el h1 (porque un nuevo elemento aparece bajo un cursor). Esto cancelaba el timer recién armado por `exitPianoMode`.
+Bug sutil: al pasar de modo piano a texto (vía hover en piano), las letras del h1 emergen *exactamente donde estaba el cursor del usuario*. Aunque el cursor esté estacionario, el navegador dispara `mouseenter` en el h1 (porque un nuevo elemento aparece bajo un cursor). Esto disparaba una animación random del avatar sin que el usuario hubiera hecho nada.
 
 Fix: un flag de un solo disparo, válido 600ms. El primer `mouseenter` tras `exitPianoMode` se ignora; los posteriores funcionan normal.
+
+### 6.9 El hover sobre el h1 no afecta al timer
+
+El timer arranca con la primera interacción global y solo se rearma desde `exitPianoMode`. Hacer hover sobre el h1 dispara la animación random del avatar pero **no toca el timer** — el contador sigue corriendo aunque el cursor esté quieto sobre el título. Decisión deliberada del usuario: el modo piano no debe depender de dónde esté el cursor en el hero.
 
 ---
 
