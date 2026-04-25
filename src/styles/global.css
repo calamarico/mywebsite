@@ -127,6 +127,10 @@ img { display: block; max-width: 100%; }
   font-variation-settings: 'wght' 800;
   color: var(--fg);
   cursor: default;
+  /* Sin wrap: en hover el letter-spacing se relaja y el peso sube; en mobile
+     ese delta empujaba la última 'o' a una segunda línea. nowrap garantiza
+     que las 10 letras siempre comparten fila. */
+  white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
   transition:
