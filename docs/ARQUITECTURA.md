@@ -42,6 +42,7 @@ mywebsite/
 │   │   └── mm_bernard.jpeg            # favicon
 │   ├── components/
 │   │   ├── Hero.tsx            # h1, gestión del modo (text/intro/piano)
+│   │   ├── HeroCredits.tsx     # panel "credits roll" con la lista de skills tras la canción
 │   │   ├── HeroPiano.tsx       # piano DOM (29 blancas + 20 negras), <audio>, integra useFFTPiano
 │   │   ├── KalAmaricoIntro.tsx # intro terminal animado (~17s) que precede al modo piano
 │   │   ├── KalamaricoAvatar.tsx # sprite + hook useKalamaricoAvatar (loop random + tryPlay)
@@ -149,10 +150,12 @@ Expone un **controller** con:
   2. El loop respeta `cancelRef` entre ciclos para parar limpio cuando cambia el prop.
 
 El cleanup del effect (común a ambos modos):
-- Marca `cancelRef.current = true` para que `tryPlay` aborte entre frames.
-- Cancela timers Y **resuelve las promesas asociadas**. Cada entrada de `timersRef` es `{ id, resolve }`; al cancelar, llamamos `clearTimeout(id)` Y `resolve()` para desbloquear los `await wait(...)` pendientes — el for-loop de `tryPlay` avanza al siguiente check de `cancelRef` y sale limpio (cero promesas dangling).
-- Hace `setState('normal')` defensivo — evita que el avatar quede atascado en un frame intermedio (importante al salir del modo whistle: si no, se quedaría con la boca abierta).
-- Resetea `busyRef.current = false` (redundante tras el resolve(), defensivo por si algún path no pase por el for-loop).
+- **Incrementa `generationRef.current`** para invalidar la captura de orphans (tryPlay y el propio loop). Cada `tryPlay` y cada cuerpo del effect captura `generationRef.current = myGen` al arrancar; cualquier cambio del counter hace que `myGen !== generationRef.current` y el for-loop / while-loop salgan en el siguiente check.
+- Cancela timers Y **resuelve las promesas asociadas**. Cada entrada de `timersRef` es `{ id, resolve }`; al cancelar llamamos `clearTimeout(id)` Y `resolve()` para desbloquear los `await wait(...)` pendientes. El for-loop de `tryPlay` despierta, ve que su captura es stale, y sale limpio.
+- Hace `setState('normal')` defensivo, evita que el avatar quede atascado en un frame intermedio (importante al salir del modo whistle: si no, se quedaría con la boca abierta).
+- Resetea `busyRef.current = false` (redundante tras el resolve, defensivo por si algún path no pase por el for-loop).
+
+> **Por qué generación en lugar de un `cancelRef` compartido**: la primera versión usaba `cancelRef = true` en cleanup y `cancelRef = false` al arrancar el nuevo effect. Bug: la promesa resuelta en cleanup despertaba en un microtask DESPUÉS de que el nuevo effect ya hubiera reseteado `cancelRef` a false. El orphan veía `cancelRef.current = false`, no rompía, y seguía setState a frames del modo viejo (síntoma: avatar atascado silbando tras terminar la canción). Con generación, cada effect run tiene su propia captura inmutable; el orphan ve siempre que su `myGen` es distinto del `generationRef` actual y aborta.
 
 > **Por qué un único effect comparte ambos modos**: el cleanup uniforme (`cancelRef + clearTimers + setState('normal')`) garantiza que cualquier transición entre modos deje el avatar en estado limpio. Versiones anteriores intentaron un loop separado fuera del hook y se enredaron con races (ver §6.2).
 
@@ -199,7 +202,8 @@ Núcleo de la lógica. Gestiona:
 - **`window.addEventListener('click' | 'keydown')`** registrado una sola vez. Al primer evento marca `hasInteractedRef = true`, llama `startIntro()`, y se desregistra.
 - **`onMouseEnter` del h1** → `handleTitleEnter`: dispara la animación random del avatar (`onTitleHover`). **No afecta al modo** — el hover es solo para el avatar.
 - **`onComplete` del `<KalAmaricoIntro>`** → `handleIntroComplete`: ~17s después del montaje del intro, transiciona a `mode = 'piano'`. Si en ese intervalo el audio falló (`pianoDisabledRef = true`), vuelve a `'text'` en su lugar.
-- **`onAudioEnded` del `<HeroPiano>`** → `exitPianoMode`: única ruta de salida del modo piano. Vuelve a texto, marca `pianoDisabledRef = true`, y si no hubo fallo de audio activa `encoreAvailable = true` para mostrar el replay.
+- **`onAudioEnded` del `<HeroPiano>`** → `exitPianoMode`: ruta de salida natural del modo piano (canción terminada). Vuelve a texto, marca `pianoDisabledRef = true`, y si no hubo fallo de audio activa `encoreAvailable = true` para mostrar el replay.
+- **Exit manual del replay** (solo cuando `mode === 'piano' && encoreAvailable`): un `useEffect` registra listeners de click y keydown a nivel `document`. Click fuera de `.hero-stage` (ref `stageRef`) o tecla `Escape` invocan `exitPianoMode`. **Solo en replays**, no en el primer ciclo: en la primera pasada el usuario debe vivir la experiencia completa; en replays ya la conoce y puede salir cuando quiera.
 - **`onAudioFailed` del `<HeroPiano>`** → `handleAudioFailed`: si el hook reporta fallo definitivo (unlock o `audio.play()` rechaza), marca `pianoDisabledRef = true` Y `audioFailedRef = true`, y si estábamos en intro o piano, sale a texto inmediatamente. **No** activa `encoreAvailable`.
 - **`onClick` del link `encore?`** → `handleEncoreClick`: replay manual. Llama a `e.stopPropagation()` (para que el handler global de App no dispare `surprised`), comprueba que el audio no falló y que `mode === 'text'`, y hace `setMode('piano')` directamente — saltándose la intro de 17s.
 
@@ -676,6 +680,58 @@ El navegador libera el lock automáticamente cuando el tab se oculta (`document.
 
 `acquire()` puede rechazar (permisos, batería baja en algunos OS). El hook lo captura silenciosamente — no hay UI de error porque mantener la pantalla despierta es nice-to-have, no crítico.
 
+### 4.14 Credits — `HeroCredits.tsx`
+
+Panel inline tipo "credits roll" que aparece bajo el role tras completar la canción al menos una vez. Lista las skills demostradas en la web, agrupadas en 8 categorías.
+
+#### Trigger
+
+En Hero hay dos botones bajo el role cuando `encoreAvailable && mode === 'text'`:
+
+```
+encore?    ·    see the credits
+```
+
+Click en `see the credits` toggle un state local `creditsOpen` en Hero. Si abre, el panel se renderiza. Si cierra, se oculta. ESC también cierra (handler en `useEffect` con `keydown`).
+
+`e.stopPropagation()` en el handler evita que el click handler global de App dispare `surprised`.
+
+#### Estructura
+
+`<HeroCredits>` renderiza:
+- Un `<h2>` "what just happened" con `tabIndex={-1}` y `ref` para focus on open.
+- 8 `<section>` (una por categoría: React, Web Audio, Performance, CSS, Mobile, A11y, Animation, UX).
+- Cada section pasa `style={{ '--i': index }}` para el delay escalonado.
+
+#### Animación "credits roll"
+
+Cada section anima con `credits-fade-in` (opacity 0 → 1 + translateY 8px → 0):
+
+```css
+.hero-credits__section {
+  animation: credits-fade-in 600ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: calc(200ms + var(--i, 0) * 180ms);
+}
+```
+
+8 sections × 180ms ≈ 1.6s para que aparezca todo. El título anima primero, luego cascading de categorías.
+
+#### Detalle CSS: dimming via rgba en lugar de opacity
+
+Las keyframes terminan en `opacity: 1`. Si dimming se hiciera con `opacity: 0.78` en el elemento, al terminar la animación habría snap (1 → 0.78). Por eso se usa `color: rgba(245, 245, 245, 0.78)` para el dimming, evitando el conflicto con la keyframe.
+
+#### Reduced motion
+
+En `prefers-reduced-motion: reduce`: se desactiva el `animation` del título y las sections. El panel aparece de golpe.
+
+#### Accesibilidad
+
+- Trigger es `<button>` con `aria-expanded` y `aria-controls`.
+- Panel tiene `role="region"` y `aria-labelledby` apuntando al h2.
+- Focus se mueve al h2 al abrir (vía `useEffect` que llama `titleRef.current.focus()`).
+- ESC cierra desde cualquier sitio.
+- Bullets son texto seleccionable (`user-select: text`) — el visitante puede copiar/citar.
+
 ---
 
 ## 5. Flujo completo del usuario
@@ -723,7 +779,8 @@ El navegador libera el lock automáticamente cuando el tab se oculta (`document.
    - Avatar: el hook recibe `whistle=false` → cleanup deja el avatar en `'normal'` → re-arranca el random loop (3s de warm-up + smile + bucle aleatorio).
    - App libera el `Screen Wake Lock` (cleanup del effect).
    - CSS: piano fade-out, h1 reaparece (letras en cascada inversa con `--i-rev`), role vuelve.
-   - El link `encore?` aparece bajo el role (animación 600ms con delay 400ms para entrar tras el role).
+   - Bajo el role aparecen DOS links separados por un punto: `encore?  ·  see the credits` (animación 600ms con delay 400ms para entrar tras el role).
+   - Click en `see the credits` despliega el panel `<HeroCredits>` con las skills demostradas en cascading reveal (~1.6s para que todas las categorías aparezcan).
 
 7. **Click en `encore?` (replay manual)**.
    - `handleEncoreClick`: `e.stopPropagation()` evita que el click handler de App dispare `surprised`.
@@ -833,6 +890,8 @@ Trade-offs aceptados:
 - **Sin UI de error visible**: si el audio falla, el usuario nunca lo nota — la página parece no tener la feature. Aceptable: el modo piano es un easter-egg, no un funcional crítico.
 - **El replay nunca incluye intro**: aunque sea pedagógicamente útil para volver a "leer" el typewriter, dejarlo fuera mantiene el replay rápido y respeta que ya se vio.
 - **Un único `console.warn` por sesión** ante fallos: idempotente vía `failureLoggedRef` en el hook.
+
+**El replay es interrumpible** (a diferencia del primer ciclo): durante un replay, click fuera del `.hero-stage` o tecla `Escape` salen del modo piano inmediatamente vía `exitPianoMode`. La razón es asimétrica: en la primera pasada el usuario debe ver la canción completa para que la experiencia tenga sentido (y para que el link `encore?` aparezca después); en replays ya la conoce, así que se le permite cortar cuando quiera. El listener se registra solo cuando `mode === 'piano' && encoreAvailable`.
 
 ### 6.11 Intro narrativa en lugar de timer ciego
 
@@ -1009,7 +1068,8 @@ Aplicado a: `heroModeRef` (App), `modeRef` (Hero), `onStartRef` (KalamaricoAvata
 | --- | --- |
 | `main.tsx` | Bootstrapping React + carga fuente + easter egg consola |
 | `App.tsx` | Composición raíz, owner del avatar y heroMode mirror |
-| `Hero.tsx` | Estado del modo (text/intro/piano), guards, gestión de transiciones |
+| `Hero.tsx` | Estado del modo (text/intro/piano), guards, gestión de transiciones, encore + credits triggers |
+| `HeroCredits.tsx` | Panel inline con lista de skills demostradas (cascading reveal post-piano) |
 | `HeroPiano.tsx` | DOM del piano, mount del `<audio>`, integración useFFTPiano |
 | `KalAmaricoIntro.tsx` | Intro terminal animado (~17s) que precede al modo piano |
 | `KalamaricoAvatar.tsx` | Sprite, `useKalamaricoAvatar` (loop random + tryPlay) |

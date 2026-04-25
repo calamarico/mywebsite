@@ -150,10 +150,17 @@ export function useKalamaricoAvatar(
 ): KalamaricoController {
   const [state, setState] = useState<AvatarState>('normal')
   const busyRef = useRef(false)
-  const cancelRef = useRef(false)
+  // Counter de "generación" para cancelación scoped por effect run. Cada
+  // `tryPlay` y cada cuerpo del effect captura `generationRef.current` al
+  // arrancar; si el counter cambia (cleanup lo incrementa), su captura se
+  // vuelve stale y aborta. Reemplaza al `cancelRef` compartido, que tenía
+  // un bug: al salir de piano, el nuevo effect reseteaba cancelRef=false
+  // ANTES de que los orphans (tryPlay whistle in flight) despertaran de
+  // sus `wait` resueltos en cleanup, así que seguían corriendo y el avatar
+  // se quedaba atascado en frames de silbido.
+  const generationRef = useRef(0)
   // Cada timer guarda también su `resolve` para que el cleanup pueda
-  // desbloquear las promesas que estuvieran awaitando en `wait()`. Sin esto,
-  // un `tryPlay` cancelado mid-await dejaba la promesa dangling.
+  // desbloquear las promesas que estuvieran awaitando en `wait()`.
   const timersRef = useRef<PendingTimer[]>([])
   const lastAnimRef = useRef<AvatarAnimation | null>(null)
 
@@ -177,6 +184,7 @@ export function useKalamaricoAvatar(
     async (anim: AvatarAnimation): Promise<boolean> => {
       if (busyRef.current) return false
       busyRef.current = true
+      const myGen = generationRef.current
       try {
         onStartRef.current?.(anim)
         const { frames, frameDuration } = anim
@@ -185,7 +193,7 @@ export function useKalamaricoAvatar(
           : frames.map(() => frameDuration)
 
         for (let i = 0; i < frames.length; i++) {
-          if (cancelRef.current) break
+          if (generationRef.current !== myGen) break
           setState(frames[i])
           const delay = durations[i] ?? 0
           if (delay > 0) await wait(delay)
@@ -211,27 +219,28 @@ export function useKalamaricoAvatar(
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
 
-    cancelRef.current = false
+    const myGen = generationRef.current
+    const isStale = () => generationRef.current !== myGen
 
     const loop = async () => {
       if (whistle) {
         // Loop continuo de silbido durante el modo piano.
-        while (!cancelRef.current) {
+        while (!isStale()) {
           await tryPlay(ANIMATIONS.whistle)
-          if (cancelRef.current) return
+          if (isStale()) return
         }
         return
       }
 
       // Loop random normal.
       await wait(3000)
-      if (cancelRef.current) return
+      if (isStale()) return
       await tryPlay(ANIMATIONS.smile)
 
-      while (!cancelRef.current) {
+      while (!isStale()) {
         const gap = 1000 + Math.random() * 2000
         await wait(gap)
-        if (cancelRef.current) return
+        if (isStale()) return
         await tryPlayRandom()
       }
     }
@@ -239,11 +248,14 @@ export function useKalamaricoAvatar(
     loop()
 
     return () => {
-      cancelRef.current = true
+      // Incrementar el generation invalida la captura de cualquier orphan
+      // (tryPlay o el propio loop) — sus checks `isStale()` o
+      // `generationRef.current !== myGen` se vuelven true y abortan en el
+      // siguiente await/iter. El nuevo effect captura el generation
+      // incrementado, así que sus checks no entran en conflicto.
+      generationRef.current += 1
       // Cancelar timers Y resolver las promesas asociadas. Sin el resolve(),
-      // los `await wait(...)` dentro de `tryPlay` quedaban dangling para
-      // siempre. Con el resolve, el for-loop de `tryPlay` avanza al siguiente
-      // check de cancelRef y sale limpio.
+      // los `await wait(...)` dentro de `tryPlay` quedaban dangling.
       timersRef.current.forEach(({ id, resolve }) => {
         clearTimeout(id)
         resolve()

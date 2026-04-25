@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { HeroPiano } from './HeroPiano'
+import { HeroCredits } from './HeroCredits'
 import { KalAmaricoIntro } from './KalAmaricoIntro'
 import { useLatestRef } from '../hooks/useLatestRef'
 
@@ -23,6 +24,9 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
   // Una vez la canción ha terminado al menos una vez, el link "encore?"
   // se muestra bajo el role para permitir replays en modo texto.
   const [encoreAvailable, setEncoreAvailable] = useState(false)
+  // Toggle del panel de credits ("see the credits"). Solo se renderiza si
+  // `encoreAvailable && mode === 'text' && creditsOpen`.
+  const [creditsOpen, setCreditsOpen] = useState(false)
   // Guard: el modo intro/piano no debe activarse hasta que el usuario haya
   // interactuado al menos una vez (click o keydown). Sin gesture el navegador
   // bloquea el audio y entraríamos al modo piano sin música.
@@ -123,6 +127,49 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
     }
   }, [startIntro])
 
+  // ESC cierra el panel de credits si está abierto.
+  useEffect(() => {
+    if (!creditsOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCreditsOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [creditsOpen])
+
+  // Exit manual del replay del modo piano: ESC o click fuera del stage.
+  // Solo se activa cuando es un REPLAY (encoreAvailable === true). En el
+  // primer ciclo (intro → piano) el usuario debe esperar a que termine la
+  // canción; en replays ya conoce la experiencia y puede salirse.
+  const stageRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (mode !== 'piano') return
+    if (!encoreAvailable) return
+
+    const onClick = (e: MouseEvent) => {
+      const stage = stageRef.current
+      if (!stage) return
+      if (!stage.contains(e.target as Node)) {
+        exitPianoMode()
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') exitPianoMode()
+    }
+
+    document.addEventListener('click', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('click', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [mode, encoreAvailable, exitPianoMode])
+
+  const handleCreditsToggle = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setCreditsOpen((open) => !open)
+  }, [])
+
   // El hover sobre el h1 dispara la animación random del avatar pero NO
   // afecta al timer de idle (no hay timer).
   const handleTitleEnter = useCallback(() => {
@@ -137,7 +184,7 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
 
   return (
     <div className="hero" data-mode={mode}>
-      <div className="hero-stage" data-reveal="2">
+      <div className="hero-stage" data-reveal="2" ref={stageRef}>
         <h1
           className="hero-title"
           onMouseEnter={handleTitleEnter}
@@ -173,14 +220,29 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
       </div>
       <p className="hero-role" data-reveal="3">{ROLE}</p>
       {encoreAvailable && mode === 'text' && (
-        <button
-          type="button"
-          className="hero-encore"
-          onClick={handleEncoreClick}
-          aria-label="Play the concert again"
-        >
-          encore?
-        </button>
+        <div className="hero-cta">
+          <button
+            type="button"
+            className="hero-encore"
+            onClick={handleEncoreClick}
+            aria-label="Play the concert again"
+          >
+            encore?
+          </button>
+          <span className="hero-cta__sep" aria-hidden="true">·</span>
+          <button
+            type="button"
+            className="hero-credits-trigger"
+            onClick={handleCreditsToggle}
+            aria-expanded={creditsOpen}
+            aria-controls="hero-credits"
+          >
+            {creditsOpen ? 'hide credits' : 'see the credits'}
+          </button>
+        </div>
+      )}
+      {encoreAvailable && mode === 'text' && creditsOpen && (
+        <HeroCredits id="hero-credits" />
       )}
     </div>
   )
