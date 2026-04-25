@@ -97,6 +97,7 @@ export function HeroPiano({
           ref={audioRef}
           src={audioSrc}
           preload="auto"
+          playsInline
           onEnded={onAudioEnded}
         />
       )}

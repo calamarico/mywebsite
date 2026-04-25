@@ -66,7 +66,14 @@ export function useFFTPiano({
     const audio = audioRef.current
     if (!audio) return
 
-    const unlock = async () => {
+    const unlock = () => {
+      // Mobile Chrome/Safari requieren que `audio.play()` y `ctx.resume()`
+      // se invoquen DENTRO del stack del gesture. Cualquier `await` previo
+      // consume la "user activation" y los siguientes `play/resume` se
+      // tratan como auto-start → la autoplay policy los rechaza.
+      // Por eso este unlock es síncrono: dispara ambas promesas y resuelve
+      // sus efectos secundarios (pause, restore muted) en el `.then/.finally`
+      // sin bloquear con await.
       try {
         if (!audioCtxRef.current) {
           const Ctor =
@@ -88,15 +95,34 @@ export function useFFTPiano({
           sourceRef.current = source
           analyserRef.current = analyser
         }
-        await audioCtxRef.current.resume()
-        // Silent play/pause cycle to fully unlock the media element.
+        // Fire-and-forget: resume y play en paralelo, sin await.
+        audioCtxRef.current.resume().catch(() => {
+          // Resume puede rechazar en algunos browsers si el context ya está
+          // running; no es síntoma de fallo. El `start()` real lo reintenta.
+        })
+
         const wasMuted = audio.muted
         audio.muted = true
-        try {
-          await audio.play()
+        const playPromise = audio.play()
+        if (playPromise && typeof playPromise.then === 'function') {
+          playPromise
+            .then(() => {
+              audio.pause()
+              audio.currentTime = 0
+            })
+            .catch((e) => {
+              // En Android algunas versiones rechazan el silent prime aunque
+              // el play() real al entrar al modo piano sí funcione. NO
+              // marcamos fallo definitivo aquí: dejamos que `start()` sea el
+              // juez real.
+              console.warn('[useFFTPiano] silent unlock rejected (continuing):', e)
+            })
+            .finally(() => {
+              audio.muted = wasMuted
+            })
+        } else {
           audio.pause()
           audio.currentTime = 0
-        } finally {
           audio.muted = wasMuted
         }
       } catch (e) {
@@ -228,6 +254,11 @@ export function useFFTPiano({
         audio.currentTime = 0
         await audio.play()
       } catch (e) {
+        // AbortError = play() interrumpido por un pause() (race típico al
+        // alternar `playing`). No es fallo de autoplay, no notificamos.
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          return
+        }
         notifyFailure('audio-play-rejected', e)
         setAudioAvailable(false)
         return

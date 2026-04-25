@@ -11,6 +11,7 @@ import {
   usePixelParticles,
   type ParticlePalette,
 } from './hooks/usePixelParticles'
+import { useMusicalNotes } from './hooks/useMusicalNotes'
 
 const PALETTE_BY_ANIM = new WeakMap<AvatarAnimation, ParticlePalette>([
   [ANIMATIONS.blink, 'cyan'],
@@ -24,8 +25,14 @@ const PALETTE_BY_ANIM = new WeakMap<AvatarAnimation, ParticlePalette>([
 function App() {
   const avatarRef = useRef<HTMLSpanElement>(null)
   const { burst, container } = usePixelParticles()
+  const { start: startNotes, stop: stopNotes, MusicalNotesLayer } = useMusicalNotes()
 
   const [heroMode, setHeroMode] = useState<HeroMode>('text')
+
+  // Espejo del state para que el click handler global no se re-instale en
+  // cada cambio de modo (mismo patrón que `modeRef` en Hero).
+  const heroModeRef = useRef<HeroMode>(heroMode)
+  heroModeRef.current = heroMode
 
   const onAnimationStart = useCallback(
     (anim: AvatarAnimation) => {
@@ -43,22 +50,38 @@ function App() {
 
   useEffect(() => {
     const onClick = () => {
+      // Durante el modo piano el avatar se queda en `grimace` puro: ningún
+      // click dispara animaciones para no romper la atmósfera.
+      if (heroModeRef.current === 'piano') return
       void tryPlay(ANIMATIONS.surprised)
     }
     document.addEventListener('click', onClick)
     return () => document.removeEventListener('click', onClick)
   }, [tryPlay])
 
-  // En modo piano mostramos el frame estático de grimace. La única excepción
-  // es 'surprised' (animación legítima disparada por el click), que dejamos
-  // pasar para que se vea. Cualquier otro state durante piano (p.ej. uno
-  // atascado por un loop interrumpido a mitad) se tapa con grimace.
-  const displayState =
-    heroMode === 'piano' && state !== 'surprised' ? 'grimace' : state
+  // Notas musicales flotando alrededor del avatar mientras suena el piano.
+  // Se respeta `prefers-reduced-motion` saltando el efecto (el hook trae sus
+  // propios keyframes inline, no caen bajo el media query global).
+  useEffect(() => {
+    if (heroMode !== 'piano') {
+      stopNotes()
+      return
+    }
+    if (!avatarRef.current) return
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced) return
+    startNotes(avatarRef.current)
+    return () => stopNotes()
+  }, [heroMode, startNotes, stopNotes])
+
+  // En modo piano mostramos el frame estático de grimace. Como el click ya no
+  // dispara `surprised` y el loop está pausado, no hace falta excepción.
+  const displayState = heroMode === 'piano' ? 'grimace' : state
 
   return (
     <>
       {container}
+      <MusicalNotesLayer />
       <header className="site-header" data-reveal="1">
         <KalamaricoAvatar ref={avatarRef} state={displayState} size={64} />
         <span className="handle">@calamarico</span>

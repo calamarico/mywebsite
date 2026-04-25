@@ -48,6 +48,7 @@ mywebsite/
 │   │   └── SocialLinks.tsx     # iconos SVG inline + enlaces footer
 │   ├── hooks/
 │   │   ├── useFFTPiano.ts      # AudioContext + Analyser + RAF + onset detection
+│   │   ├── useMusicalNotes.tsx # notas musicales flotantes alrededor del avatar durante modo piano
 │   │   └── usePixelParticles.tsx  # bursts de partículas pixel-art al disparar animaciones
 │   └── styles/
 │       └── global.css          # tokens, layout, hero, piano, animaciones, reduced-motion
@@ -236,7 +237,7 @@ Cada letra es un `<span>` con `--i` (índice ascendente) y `--i-rev` (descendent
 
 ```html
 <div class="hero-piano" onPointerEnter={onHoverOut}>
-  <audio src={audioSrc} preload="auto" onEnded={onAudioEnded} />
+  <audio src={audioSrc} preload="auto" playsInline onEnded={onAudioEnded} />
   <div class="hero-piano__whites">
     <div class="hero-piano__white"></div> × 29
   </div>
@@ -245,6 +246,8 @@ Cada letra es un `<span>` con `--i` (índice ascendente) y `--i-rev` (descendent
   </div>
 </div>
 ```
+
+> El atributo `playsInline` es necesario en iOS Safari para que el audio no se vaya a fullscreen al hacer `play()`. En Android no estorba.
 
 Las blancas en grid `repeat(29, 1fr)`. Las negras en `position: absolute` con su `left` calculado por nth-child, una regla por tecla (4 octavas × 5 negras = 20 reglas).
 
@@ -293,15 +296,17 @@ Núcleo del sistema audio-reactivo.
 
 #### Pre-unlock
 
-`useEffect` separado que registra un listener `pointerdown`/`keydown` en `window` (no `once: true` — se desregistra manualmente). Al primer gesture:
+`useEffect` separado que registra un listener `pointerdown`/`keydown` en `window` con `{ once: true }`. Al primer gesture:
 
 1. Crea `AudioContext` (con fallback `webkitAudioContext` para Safari).
 2. Crea `MediaElementSource` desde el `<audio>` ref.
 3. Crea `AnalyserNode` con `fftSize: 2048`, `smoothingTimeConstant: 0.6`.
 4. Conecta: `source → analyser → destination`.
-5. Llama `ctx.resume()` (necesario tras la creación, requiere gesture).
-6. Hace un ciclo silencioso `audio.muted = true; await audio.play(); audio.pause(); audio.currentTime = 0; audio.muted = false`. Esto **desbloquea por completo el HTMLMediaElement** para `audio.play()` posteriores fuera de gesture.
-7. Se desregistra a sí mismo.
+5. Dispara **sin await** `ctx.resume()` y `audio.play()` (con `audio.muted = true`) **dentro del mismo stack del gesture**. Las promesas resuelven después: tras el play silencioso, hace `pause()` + `currentTime = 0` y restaura `muted`.
+
+> **Por qué síncrono y sin await previo** (Android/iOS Chrome): cualquier `await` antes del `audio.play()` consume la "user activation" del gesture y los siguientes `play/resume` se tratan como auto-start → autoplay policy los rechaza. Disparar ambas promesas síncronamente dentro del listener mantiene la activación.
+
+> **Tolerancia ante fallo del silent prime**: si el `audio.play()` muteado rechaza, **solo se loguea un `console.warn`**, NO se invoca `notifyFailure`. Algunas versiones de Android Chrome rechazan el prime silencioso aunque el play() real al entrar a piano sí funciona. Dejamos que `start()` sea el juez real del estado del audio.
 
 > **Decisión clave**: el `AudioContext` **solo se crea aquí**. El effect principal nunca lo crea. Si no ha habido gesture, el effect principal sale temprano con `audioAvailable = false` y no hay piano sonando — nunca se loguea el warning de Chrome "AudioContext was not allowed to start".
 
@@ -311,23 +316,27 @@ Corre cuando `playing` cambia. Si `playing === false` o `ctx === null`, sale tem
 
 Si `playing === true` y el ctx existe:
 
-1. `audio.currentTime = 0` — siempre arranca desde el principio.
-2. `await audio.play()`.
-3. Si rechaza, llama `notifyFailure('audio-play-rejected', e)`, marca `audioAvailable = false` y vuelve.
-4. Si resuelve, arranca el RAF loop.
+1. `await ctx.resume()` si está suspended.
+2. `audio.currentTime = 0` — siempre arranca desde el principio.
+3. `await audio.play()`.
+4. Si rechaza con `AbortError` (race típico cuando un `pause()` interrumpe un `play()`), se ignora silenciosamente.
+5. Si rechaza con cualquier otro error, llama `notifyFailure('audio-play-rejected', e)`, marca `audioAvailable = false` y vuelve.
+6. Si resuelve, arranca el RAF loop.
 
 #### Reporte de fallos — `onAudioFailed`
 
 Opción opcional del hook. Se invoca **una sola vez por sesión** (gated por `failureLoggedRef`) cuando ocurre un fallo definitivo de audio. Casos cubiertos:
 
 - `webaudio-unsupported`: el navegador no expone `AudioContext` ni `webkitAudioContext`.
-- `unlock-failed`: el `try` del pre-unlock cae al catch (creación de `AudioContext`, `createMediaElementSource`, `resume()` o el play/pause silencioso fallan).
-- `audio-play-rejected`: el `audio.play()` del effect principal rechaza.
+- `unlock-failed`: el `try` síncrono del pre-unlock cae al catch (creación de `AudioContext`, `createMediaElementSource`, etc.). El rechazo del play silencioso **no** entra aquí.
+- `audio-play-rejected`: el `audio.play()` real del effect principal rechaza con un error que no es `AbortError`.
 
 Cada caso loguea un `console.warn` con la razón y el error original. Solo el primer fallo invoca el callback; los siguientes solo loguean. Casos que **NO** disparan `onAudioFailed`:
 
 - "Aún no ha habido gesture" — no es fallo, es estado transicional. Lo cubre el guard de `hasInteractedRef` en Hero.
 - `<audio>` element no montado (audioRef vacío) — pre-condición no cumplida, no error.
+- Rechazo del silent prime durante el unlock — solo `console.warn`, no fallo definitivo (Android Chrome a veces lo rechaza aunque el play real funciona).
+- `AbortError` en `audio.play()` del effect principal — race de play/pause, no fallo de autoplay.
 
 #### RAF loop — onset detection
 
@@ -427,12 +436,11 @@ Coreografía CSS controlada por `data-mode` en `.hero`.
 App calcula el `displayState` mostrado al avatar:
 
 ```ts
-const displayState =
-  heroMode === 'piano' && state !== 'surprised' ? 'grimace' : state
+const displayState = heroMode === 'piano' ? 'grimace' : state
 ```
 
-- En modo piano: muestra siempre `grimace` excepto si está corriendo un `surprised` (animación legítima disparada por el click). Cuando termina `surprised`, el state vuelve a `'normal'` y el override muestra `grimace` de nuevo.
-- En modo texto: pasa el state real del hook.
+- En modo piano: muestra siempre `grimace` puro. El click global no dispara `surprised` (ver §6.12) y el loop random está pausado, así que `state` no cambia durante piano. La fórmula se simplifica a un override directo.
+- En modo texto/intro: pasa el state real del hook.
 
 Adicionalmente, el hook recibe `paused: heroMode === 'piano'` que detiene su loop interno (no se disparan animaciones random durante el modo piano).
 
@@ -491,6 +499,51 @@ Maneja el state de fase (`'typing' | 'countdown' | 'letsgo'`), el texto actualme
 
 Se monta dentro del `.hero-stage` envuelto en un `.hero-intro-slot` con `position: absolute; top: 50%; transform: translateY(-50%)`. Ocupa el ancho del stage (que coincide con el del h1) y mantiene su altura fija de 200px. Con `pointer-events: none` para que el cursor no interactúe.
 
+### 4.11 Notas musicales — `useMusicalNotes.tsx`
+
+Hook que devuelve `{ start, stop, MusicalNotesLayer }`. Spawnea símbolos musicales (`♩ ♪ ♫ ♬`) flotando hacia arriba alrededor de un elemento target mientras está activo. App lo usa para acompañar visualmente al avatar durante el modo piano.
+
+#### API
+
+- `start(target: HTMLElement | DOMRect, opts?: MusicalNotesOptions)` — arranca un `setInterval` que spawnea una nota cada `interval` ms (default `340`). Si ya estaba corriendo, hace `stop()` antes.
+- `stop()` — limpia el interval, vacía `targetRef`, vacía las notas activas.
+- `MusicalNotesLayer` — componente que portaliza a `document.body` un `<style>` con los keyframes `kala-note-float` y un `<div>` por nota viva.
+
+#### Mecánica
+
+Cada nota:
+- Se posiciona en `position: fixed` en coordenadas calculadas a partir del `getBoundingClientRect()` del target. El `rect` se vuelve a leer en cada tick → si el avatar se mueve (scroll, layout shift), las notas le siguen.
+- Spawnea con jitter angular hacia el hemisferio superior del target (efecto "silba hacia arriba"), a un radio de 18-48px del centro.
+- Anima vía CSS keyframes `kala-note-float` durante 1.8-3.2s (translate + rotate + scale + opacity).
+- Tiene paleta `#ffffff / #e0a0ff / #c8b8ff / #f0d0ff` (compatible con el accent del proyecto).
+- Se autodestruye via `setTimeout` cuando termina su animación.
+
+#### Integración en App
+
+```ts
+useEffect(() => {
+  if (heroMode !== 'piano') {
+    stopNotes()
+    return
+  }
+  if (!avatarRef.current) return
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (reduced) return
+  startNotes(avatarRef.current)
+  return () => stopNotes()
+}, [heroMode, startNotes, stopNotes])
+```
+
+`<MusicalNotesLayer />` se monta una sola vez en el árbol JSX (junto al `{container}` de partículas). Su orden en el JSX es estético: portaliza a `document.body`.
+
+#### Rate fijo, no sincronizado con FFT
+
+Las notas se spawnean a ritmo fijo (340ms) — no siguen los onsets reales del audio. Decisión consciente, ver §6.13.
+
+#### Reduced motion
+
+El hook trae sus propios keyframes inline, fuera del alcance del media query global. Por eso App añade un guard explícito antes de `startNotes`. Si el usuario tiene `prefers-reduced-motion: reduce`, no aparecen notas.
+
 ---
 
 ## 5. Flujo completo del usuario
@@ -519,17 +572,18 @@ Se monta dentro del `.hero-stage` envuelto en un `.hero-intro-slot` con `positio
    - Avatar: `paused=true`, loop random detenido. Display override → `grimace` estático.
    - useFFTPiano: `playing=true` → `audio.currentTime=0`, `audio.play()`, RAF arranca.
    - El MP3 suena. Las teclas se iluminan en lavanda siguiendo el FFT.
+   - App arranca `useMusicalNotes` → notas `♩ ♪ ♫ ♬` empiezan a flotar hacia arriba alrededor del avatar (rate 340ms, paleta lavanda/blanco).
 
 5. **Click durante modo piano**.
-   - El click handler de App dispara `tryPlay(surprised)`.
-   - `tryPlay` no consulta `cancelRef`, solo `busyRef`. Como el loop está pausado, `busyRef = false` → `surprised` se ejecuta normalmente.
-   - Burst naranja aparece sobre el avatar.
-   - Tras 900ms, state vuelve a `'normal'` → display override → `grimace` de nuevo.
+   - El click handler de App entra y comprueba `heroModeRef.current === 'piano'` → `return`.
+   - **No se dispara `surprised`** ni se emite burst. El avatar permanece en el frame `grimace` puro.
+   - Las notas musicales siguen flotando con normalidad.
 
 6. **Canción terminada**.
    - El `<audio>` dispara `onEnded` → `exitPianoMode`.
    - `setMode('text')`, marca `pianoDisabledRef = true` (modo piano deshabilitado para el resto de la sesión), activa `ignoreNextTitleEnterRef` (600ms).
    - useFFTPiano: `playing=false` → cleanup → `audio.pause()`, RAF cancelado.
+   - App detecta cambio de `heroMode` → llama `stopNotes()` → no se spawnan notas nuevas; las notas activas terminan su animación pendiente y se limpian solas.
    - Avatar: `paused=false` → loop random vuelve.
    - CSS: piano fade-out, h1 reaparece (letras en cascada inversa con `--i-rev`), role vuelve.
    - **No se rearma el timer**. La sesión sigue en modo texto normal y ya no hay más ciclos de piano.
@@ -639,6 +693,23 @@ Contras:
 - **El gesture no puede ser sutil**: cualquier click (incluso en un enlace social) lo activa. Si el usuario está navegando con teclado, basta un keydown. Aceptable: la intro es bonita y dura 17s; si molesta, basta esperar a que termine y vuelva al estado normal tras la canción.
 - **Se respeta `prefers-reduced-motion`** saltando el intro y yendo directo al piano. La intro es animada y no tiene "modo plano".
 
+### 6.12 Click no dispara `surprised` en modo piano
+
+Durante el modo piano el avatar se queda en el frame `grimace` puro (concentrado tocando) y aparecen las notas musicales flotando a su alrededor. Permitir que el click dispare la animación `surprised` rompía esa atmósfera por dos razones:
+
+- **Visualmente compite** con las notas musicales: el burst naranja de partículas se cruza con las notas lavanda y la composición se vuelve ruidosa.
+- **Narrativamente disonante**: el avatar acaba de prometer un "concert" en la intro; reaccionar al click con cara de sorpresa cada dos segundos quita seriedad.
+
+Implementación: un guard al inicio del click handler en App (`if (heroModeRef.current === 'piano') return`). Fuera del modo piano (texto e intro), el click sigue disparando `surprised` exactamente como antes. El ref espejo evita re-instalar el handler en cada cambio de modo.
+
+### 6.13 Notas con rate fijo, no sincronizadas con FFT
+
+Las notas musicales spawnean cada 340ms a ritmo fijo, no en los onsets reales del audio detectados por la FFT. Decisión consciente:
+
+- **Separación de responsabilidades**: el FFT vive dentro de `HeroPiano` (refs imperativas, `dataset.pressed`). Exponerlo a App requeriría un nuevo callback `onTrigger` que cruzaría hooks (Hero → HeroPiano → useFFTPiano → callback hacia arriba → App), añadiendo acoplamiento por un beneficio visual marginal.
+- **Densidad estable**: a ritmo fijo el efecto se siente "ambiental"; sincronizado con onsets sería más espectacular en pasajes densos pero lo dejaría desierto en pasajes sostenidos (precisamente el caso que el `fillMode` del FFT compensa internamente para las teclas).
+- **Tunable por opción**: si en el futuro queremos densificar/relajar, basta pasar `start(avatarRef.current, { interval: 220 })` desde App.
+
 ---
 
 ## 7. Variables tunables (resumen)
@@ -706,6 +777,13 @@ Contras:
 - `fillGapMs` (450)
 - `fillEnergyFloor` (28)
 
+`useMusicalNotes.tsx` (defaults sobrescribibles vía `opts` en `start`):
+- `interval` (340 ms entre notas)
+- radio de spawn (18-48 px del centro del avatar)
+- altura de subida `dy` (55-140 px hacia arriba)
+- tamaño de la nota (14-28 px)
+- símbolos `♩ ♪ ♫ ♬`, paleta `#ffffff / #e0a0ff / #c8b8ff / #f0d0ff`
+
 `KalamaricoAvatar.tsx` (constantes hardcoded):
 - `RANDOM_POOL[]` (animaciones del loop random)
 - Tiempos de cada animación dentro de `ANIMATIONS`
@@ -726,6 +804,7 @@ Contras:
 | `KalamaricoAvatar.tsx` | Sprite, `useKalamaricoAvatar` (loop random + tryPlay) |
 | `SocialLinks.tsx` | Iconos SVG inline + enlaces footer |
 | `useFFTPiano.ts` | AudioContext + Analyser + RAF + onset detection |
+| `useMusicalNotes.tsx` | Notas musicales flotantes alrededor del avatar durante modo piano |
 | `usePixelParticles.tsx` | Bursts de partículas pixel art |
 | `global.css` | Tokens, layout, hero, piano, animaciones, reduced-motion |
 
