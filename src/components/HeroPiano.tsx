@@ -28,15 +28,15 @@ const BANDS: Band[] = [
 interface HeroPianoProps {
   playing?: boolean
   audioSrc?: string
-  onHoverOut?: () => void
   onAudioEnded?: () => void
+  onAudioFailed?: () => void
 }
 
 export function HeroPiano({
   playing = true,
   audioSrc,
-  onHoverOut,
   onAudioEnded,
+  onAudioFailed,
 }: HeroPianoProps) {
   const whiteRefs = useRef<(HTMLDivElement | null)[]>([])
   const blackRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -68,6 +68,7 @@ export function HeroPiano({
     playing: playing && !!audioSrc,
     bands: BANDS,
     onTrigger: flashKey,
+    onAudioFailed,
     pressMs: DEFAULT_PRESS_MS,
   })
 
@@ -90,7 +91,6 @@ export function HeroPiano({
       className="hero-piano"
       role="presentation"
       aria-hidden="true"
-      onPointerEnter={onHoverOut}
     >
       {audioSrc && (
         <audio

@@ -13,6 +13,7 @@ interface UseFFTPianoArgs {
   playing: boolean
   bands: Band[]
   onTrigger: (keyIndex: number, pressMs: number) => void
+  onAudioFailed?: () => void
   pressMs?: number
   historyFrames?: number
   defaultThreshold?: number
@@ -30,6 +31,7 @@ export function useFFTPiano({
   playing,
   bands,
   onTrigger,
+  onAudioFailed,
   pressMs = 120,
   historyFrames = 18,
   defaultThreshold = 1.4,
@@ -44,6 +46,17 @@ export function useFFTPiano({
   const analyserRef = useRef<AnalyserNode | null>(null)
   const onTriggerRef = useRef(onTrigger)
   onTriggerRef.current = onTrigger
+  const onAudioFailedRef = useRef(onAudioFailed)
+  onAudioFailedRef.current = onAudioFailed
+  // One-shot: el callback de fallo se invoca como mucho una vez por sesión.
+  const failureLoggedRef = useRef(false)
+
+  const notifyFailure = (reason: string, error: unknown) => {
+    console.warn('[useFFTPiano] audio failed:', reason, error)
+    if (failureLoggedRef.current) return
+    failureLoggedRef.current = true
+    onAudioFailedRef.current?.()
+  }
 
   // Pre-unlock: al primer gesture del usuario creamos el AudioContext y hacemos
   // un play()/pause() silencioso para desbloquear tanto el context como el
@@ -60,7 +73,10 @@ export function useFFTPiano({
             window.AudioContext ||
             (window as unknown as { webkitAudioContext?: typeof AudioContext })
               .webkitAudioContext
-          if (!Ctor) return
+          if (!Ctor) {
+            notifyFailure('webaudio-unsupported', null)
+            return
+          }
           const ctx = new Ctor()
           const source = ctx.createMediaElementSource(audio)
           const analyser = ctx.createAnalyser()
@@ -84,7 +100,7 @@ export function useFFTPiano({
           audio.muted = wasMuted
         }
       } catch (e) {
-        console.warn('[useFFTPiano] unlock failed', e)
+        notifyFailure('unlock-failed', e)
       }
     }
 
@@ -212,7 +228,7 @@ export function useFFTPiano({
         audio.currentTime = 0
         await audio.play()
       } catch (e) {
-        console.warn('[useFFTPiano] audio.play() rejected — falling back to silent arpeggio', e)
+        notifyFailure('audio-play-rejected', e)
         setAudioAvailable(false)
         return
       }

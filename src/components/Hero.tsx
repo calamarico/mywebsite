@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { HeroPiano } from './HeroPiano'
+import { KalAmaricoIntro } from './KalAmaricoIntro'
 
 // ─── Config (tunable) ──────────────────────────────────────
 const TITLE = 'KALAMARICO'
 const ROLE = 'Senior Frontend Developer'
-const IDLE_MS = 12_000
 const AUDIO_SRC = '/audio/piano.mp3'
 // ───────────────────────────────────────────────────────────
 
 const TITLE_LETTERS = TITLE.split('')
 
-export type HeroMode = 'text' | 'piano'
+export type HeroMode = 'text' | 'intro' | 'piano'
 
 interface HeroProps {
   onTitleHover?: () => void
@@ -19,8 +19,7 @@ interface HeroProps {
 
 export function Hero({ onTitleHover, onModeChange }: HeroProps) {
   const [mode, setMode] = useState<HeroMode>('text')
-  const idleTimerRef = useRef<number | undefined>(undefined)
-  // Guard: el modo piano no debe activarse hasta que el usuario haya
+  // Guard: el modo intro/piano no debe activarse hasta que el usuario haya
   // interactuado al menos una vez (click o keydown). Sin gesture el navegador
   // bloquea el audio y entraríamos al modo piano sin música.
   const hasInteractedRef = useRef(false)
@@ -30,31 +29,67 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
   // avatar sin que el usuario haya hecho nada. Ignoramos el primer mouseenter
   // durante 600ms.
   const ignoreNextTitleEnterRef = useRef(false)
+  // Guard persistente de sesión: se vuelve true si el audio falla o si el
+  // modo piano completa un ciclo. A partir de ahí, ningún intro/piano arranca.
+  const pianoDisabledRef = useRef(false)
+  // Espejo de `mode` para que callbacks estables consulten el state actual
+  // sin ser dependencia.
+  const modeRef = useRef<HeroMode>(mode)
+  modeRef.current = mode
 
   useEffect(() => {
     onModeChange?.(mode)
   }, [mode, onModeChange])
 
-  const scheduleIdle = useCallback(() => {
+  // Tras el primer gesture, en lugar de programar un timer, arrancamos
+  // directamente el intro (KalAmaricoIntro). Si el usuario tiene reduced-motion,
+  // saltamos el intro y vamos directo al modo piano.
+  const startIntro = useCallback(() => {
     if (!hasInteractedRef.current) return
-    window.clearTimeout(idleTimerRef.current)
-    idleTimerRef.current = window.setTimeout(() => {
-      setMode('piano')
-    }, IDLE_MS)
+    if (pianoDisabledRef.current) return
+    if (modeRef.current !== 'text') return
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    setMode(prefersReducedMotion ? 'piano' : 'intro')
   }, [])
 
-  useEffect(() => {
-    return () => {
-      window.clearTimeout(idleTimerRef.current)
+  // Cuando el intro termina (~17s, "Let's go!"), arrancamos el modo piano.
+  // Si entre medias hubo un fallo de audio (pianoDisabledRef true), nos
+  // quedamos en text.
+  const handleIntroComplete = useCallback(() => {
+    if (pianoDisabledRef.current) {
+      setMode('text')
+      return
+    }
+    setMode('piano')
+  }, [])
+
+  // Si el hook de audio reporta fallo definitivo, deshabilitamos el modo piano
+  // para el resto de la sesión. Si estábamos en intro o piano, salimos a text.
+  const handleAudioFailed = useCallback(() => {
+    pianoDisabledRef.current = true
+    if (modeRef.current === 'piano' || modeRef.current === 'intro') {
+      setMode('text')
     }
   }, [])
 
-  // Primera interacción (click/keydown global): arranca el contador idle.
+  // Salida del modo piano (solo se dispara cuando la canción termina).
+  // Tras el primer ciclo, el modo piano queda deshabilitado para el resto
+  // de la sesión.
+  const exitPianoMode = useCallback(() => {
+    setMode('text')
+    pianoDisabledRef.current = true
+    ignoreNextTitleEnterRef.current = true
+    window.setTimeout(() => {
+      ignoreNextTitleEnterRef.current = false
+    }, 600)
+  }, [])
+
+  // Primera interacción (click/keydown global): arranca el intro.
   useEffect(() => {
     const handleFirstInteraction = () => {
       if (hasInteractedRef.current) return
       hasInteractedRef.current = true
-      scheduleIdle()
+      startIntro()
       window.removeEventListener('click', handleFirstInteraction)
       window.removeEventListener('keydown', handleFirstInteraction)
     }
@@ -64,10 +99,10 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
       window.removeEventListener('click', handleFirstInteraction)
       window.removeEventListener('keydown', handleFirstInteraction)
     }
-  }, [scheduleIdle])
+  }, [startIntro])
 
   // El hover sobre el h1 dispara la animación random del avatar pero NO
-  // afecta al timer de idle.
+  // afecta al timer de idle (no hay timer).
   const handleTitleEnter = useCallback(() => {
     if (ignoreNextTitleEnterRef.current) {
       ignoreNextTitleEnterRef.current = false
@@ -75,17 +110,6 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
     }
     onTitleHover?.()
   }, [onTitleHover])
-
-  const exitPianoMode = useCallback(() => {
-    setMode('text')
-    ignoreNextTitleEnterRef.current = true
-    // Por si el cursor no estaba sobre el h1 al salir, limpiamos el flag
-    // tras un margen para que un hover legítimo posterior funcione.
-    window.setTimeout(() => {
-      ignoreNextTitleEnterRef.current = false
-    }, 600)
-    scheduleIdle()
-  }, [scheduleIdle])
 
   const lastIndex = TITLE_LETTERS.length - 1
 
@@ -113,11 +137,16 @@ export function Hero({ onTitleHover, onModeChange }: HeroProps) {
             </span>
           ))}
         </h1>
+        {mode === 'intro' && (
+          <div className="hero-intro-slot">
+            <KalAmaricoIntro onComplete={handleIntroComplete} />
+          </div>
+        )}
         <HeroPiano
           playing={mode === 'piano'}
           audioSrc={AUDIO_SRC}
-          onHoverOut={exitPianoMode}
           onAudioEnded={exitPianoMode}
+          onAudioFailed={handleAudioFailed}
         />
       </div>
       <p className="hero-role" data-reveal="3">{ROLE}</p>

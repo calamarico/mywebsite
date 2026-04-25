@@ -6,7 +6,7 @@ Documentación detallada de cómo está montado el sitio personal de **Kalamaric
 
 ## 1. Visión general
 
-Sitio one-page con tres elementos visibles permanentes (header con avatar, hero central, footer con redes) y una mecánica oculta: tras unos segundos de inactividad, el título `KALAMARICO` se transforma en un piano que reproduce un MP3 real, mientras las teclas del piano se iluminan **siguiendo los picos de frecuencia del audio en tiempo real** (FFT vía Web Audio API).
+Sitio one-page con tres elementos visibles permanentes (header con avatar, hero central, footer con redes) y una mecánica oculta: tras el primer click/tecla del usuario, una intro animada tipo terminal (typewriter, ~17s) precede al modo piano, en el que el título `KALAMARICO` se transforma en un piano que reproduce un MP3 real, mientras las teclas del piano se iluminan **siguiendo los picos de frecuencia del audio en tiempo real** (FFT vía Web Audio API). El modo piano es one-shot: tras un único ciclo completo, queda deshabilitado para el resto de la sesión.
 
 La página es estática (no hay backend). Todo el comportamiento vive en el cliente.
 
@@ -41,8 +41,9 @@ mywebsite/
 │   │   ├── kalamarico_sprite_v2.png   # sprite sheet del avatar (14 frames × 256px)
 │   │   └── mm_bernard.jpeg            # favicon
 │   ├── components/
-│   │   ├── Hero.tsx            # h1, idle, gestión del modo (text/piano)
+│   │   ├── Hero.tsx            # h1, gestión del modo (text/intro/piano)
 │   │   ├── HeroPiano.tsx       # piano DOM (29 blancas + 20 negras), <audio>, integra useFFTPiano
+│   │   ├── KalAmaricoIntro.tsx # intro terminal animado (~17s) que precede al modo piano
 │   │   ├── KalamaricoAvatar.tsx # sprite + hook useKalamaricoAvatar (loop random + tryPlay)
 │   │   └── SocialLinks.tsx     # iconos SVG inline + enlaces footer
 │   ├── hooks/
@@ -175,31 +176,35 @@ Núcleo de la lógica. Gestiona:
 
 #### State
 
-- `mode: 'text' | 'piano'` — qué renderiza el hero (h1 o piano).
-- `hasInteractedRef` — flag que se vuelve `true` tras el primer click/keydown global. **Bloquea el modo piano** hasta que el usuario haya interactuado (sin gesture el navegador no permite reproducir audio).
+- `mode: 'text' | 'intro' | 'piano'` — qué renderiza el hero (h1, intro o piano).
+- `hasInteractedRef` — flag que se vuelve `true` tras el primer click/keydown global. **Bloquea el modo intro/piano** hasta que el usuario haya interactuado (sin gesture el navegador no permite reproducir audio).
 - `ignoreNextTitleEnterRef` — flag temporal de 600ms tras `exitPianoMode` que ignora el primer `mouseenter` en el h1 (evita disparar una animación del avatar por el cursor estacionario sobre el que las letras emergen al volver a modo texto).
-- `idleTimerRef` — handle del `setTimeout` de 12s.
+- `pianoDisabledRef` — flag persistente de sesión. Se vuelve `true` en dos casos: (a) el hook de audio reporta un fallo definitivo; (b) el modo piano completa un ciclo (la canción termina). En ambos, **bloquea para siempre** la entrada al modo intro/piano hasta recargar la página.
+- `modeRef` — espejo del state `mode` para que callbacks estables (como `handleAudioFailed`) consulten el modo actual sin ser dependencia.
 
 #### Eventos
 
-- **`window.addEventListener('click' | 'keydown')`** registrado una sola vez. Al primer evento marca `hasInteractedRef = true`, llama `scheduleIdle()`, y se desregistra.
-- **`onMouseEnter` del h1** → `handleTitleEnter`: dispara la animación random del avatar (`onTitleHover`). **No afecta al timer** — el contador sigue corriendo aunque hagas hover sobre el título.
-- **`onPointerEnter` del piano** → `exitPianoMode`: vuelve a modo texto y rearma el timer.
-- **`onEnded` del `<audio>`** → también `exitPianoMode`: cuando la canción acaba, se sale.
+- **`window.addEventListener('click' | 'keydown')`** registrado una sola vez. Al primer evento marca `hasInteractedRef = true`, llama `startIntro()`, y se desregistra.
+- **`onMouseEnter` del h1** → `handleTitleEnter`: dispara la animación random del avatar (`onTitleHover`). **No afecta al modo** — el hover es solo para el avatar.
+- **`onComplete` del `<KalAmaricoIntro>`** → `handleIntroComplete`: ~17s después del montaje del intro, transiciona a `mode = 'piano'`. Si en ese intervalo el audio falló (`pianoDisabledRef = true`), vuelve a `'text'` en su lugar.
+- **`onAudioEnded` del `<HeroPiano>`** → `exitPianoMode`: única ruta de salida del modo piano. Vuelve a texto y marca `pianoDisabledRef = true`.
+- **`onAudioFailed` del `<HeroPiano>`** → `handleAudioFailed`: si el hook reporta fallo definitivo (unlock o `audio.play()` rechaza), marca `pianoDisabledRef = true` y, si estábamos en intro o piano, sale a texto inmediatamente.
 
-#### `scheduleIdle`
+> **El hover sobre el piano no hace nada** — durante el modo piano el usuario no puede salir manualmente. El piano corre hasta que la canción termina y entonces vuelve a texto definitivamente.
+
+#### `startIntro`
 
 ```ts
-const scheduleIdle = () => {
-  if (!hasInteractedRef.current) return    // guard
-  window.clearTimeout(idleTimerRef.current)
-  idleTimerRef.current = window.setTimeout(() => {
-    setMode('piano')
-  }, IDLE_MS)
+const startIntro = () => {
+  if (!hasInteractedRef.current) return    // guard primer gesture
+  if (pianoDisabledRef.current) return     // guard fallo o ciclo previo
+  if (modeRef.current !== 'text') return   // ya estamos en intro/piano
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  setMode(reduced ? 'piano' : 'intro')
 }
 ```
 
-> El guard interno hace que sea seguro llamar a `scheduleIdle` desde cualquier parte. Si no ha habido gesture, es un no-op.
+> Si el usuario tiene `prefers-reduced-motion: reduce`, salta el intro y va directo al piano. El intro no está pensado para ser breve ni discreto.
 
 #### Render
 
@@ -255,20 +260,18 @@ Las blancas en grid `repeat(29, 1fr)`. Las negras en `position: absolute` con su
   top: calc(50% - var(--piano-height) / 2);
   width: 100%;
   height: var(--piano-height);   /* 1.8 × --hero-size */
-  pointer-events: none;          /* ← solo cuando text mode */
-}
-
-.hero[data-mode='piano'] .hero-piano {
-  pointer-events: auto;          /* recibe hover para salir */
+  pointer-events: none;          /* nunca captura eventos: el piano es decorativo */
 }
 ```
+
+> El piano nunca recibe pointer events: durante el modo piano el usuario no interactúa con las teclas. La salida se produce solo cuando termina la canción.
 
 #### Estados visuales
 
 - **Base**: blancas con gradiente crema (`#f8f8f0 → #e8e8d8`), borde gris fino, sombra suave; negras con gradiente oscuro (`#222 → #444`) y sombra más profunda.
 - **Pulsada (`data-pressed="true"`)**: blanca pasa a `#f5d8ff → var(--accent)` con glow lavanda; negra pasa a `#a770cf → #5e3a7a`. `transform: translateY(2px)` simula la pulsación.
-- **Modo piano activo**: opacidad 1, scale 1, `pointer-events: auto`, transition 420ms.
-- **Modo texto**: opacidad 0, `transform: translateY(16px) scale(0.94)`, `pointer-events: none`.
+- **Modo piano activo**: opacidad 1, scale 1, transition 420ms.
+- **Modo texto**: opacidad 0, `transform: translateY(16px) scale(0.94)`.
 
 #### Flasheo imperativo
 
@@ -310,8 +313,21 @@ Si `playing === true` y el ctx existe:
 
 1. `audio.currentTime = 0` — siempre arranca desde el principio.
 2. `await audio.play()`.
-3. Si rechaza, `setAudioAvailable(false)` y vuelve.
+3. Si rechaza, llama `notifyFailure('audio-play-rejected', e)`, marca `audioAvailable = false` y vuelve.
 4. Si resuelve, arranca el RAF loop.
+
+#### Reporte de fallos — `onAudioFailed`
+
+Opción opcional del hook. Se invoca **una sola vez por sesión** (gated por `failureLoggedRef`) cuando ocurre un fallo definitivo de audio. Casos cubiertos:
+
+- `webaudio-unsupported`: el navegador no expone `AudioContext` ni `webkitAudioContext`.
+- `unlock-failed`: el `try` del pre-unlock cae al catch (creación de `AudioContext`, `createMediaElementSource`, `resume()` o el play/pause silencioso fallan).
+- `audio-play-rejected`: el `audio.play()` del effect principal rechaza.
+
+Cada caso loguea un `console.warn` con la razón y el error original. Solo el primer fallo invoca el callback; los siguientes solo loguean. Casos que **NO** disparan `onAudioFailed`:
+
+- "Aún no ha habido gesture" — no es fallo, es estado transicional. Lo cubre el guard de `hasInteractedRef` en Hero.
+- `<audio>` element no montado (audioRef vacío) — pre-condición no cumplida, no error.
 
 #### RAF loop — onset detection
 
@@ -439,7 +455,41 @@ Una sola media query en `global.css` deshabilita transiciones y animaciones para
 }
 ```
 
-El hook `useKalamaricoAvatar` también consulta `matchMedia('(prefers-reduced-motion: reduce)')` y no arranca el loop random. Igualmente `useFFTPiano` no arranca el RAF de flasheo, aunque el audio sí se reproduce.
+El hook `useKalamaricoAvatar` también consulta `matchMedia('(prefers-reduced-motion: reduce)')` y no arranca el loop random. Igualmente `useFFTPiano` no arranca el RAF de flasheo, aunque el audio sí se reproduce. En `Hero`, `startIntro` también respeta esta preferencia y salta el intro yendo directo al modo piano.
+
+### 4.10 KalAmaricoIntro — `KalAmaricoIntro.tsx`
+
+Componente de intro animada que precede al modo piano. Aparece cubriendo el área del h1 cuando `mode === 'intro'` y termina llamando a `onComplete` después de ~17s.
+
+#### Estructura
+
+Es un componente self-contained: trae sus propios estilos en un `<style>` inline (clases `kala-*`), su propia tipografía (`Press Start 2P` desde Google Fonts), y su propio loop async (sin librerías externas).
+
+#### Fases
+
+1. **Typewriter** (~13s): cinco líneas se escriben carácter a carácter, se mantienen un breve momento, y se borran. Cada línea tiene su propia velocidad de tipeo y pausa de lectura.
+2. **Countdown** (~2s): muestra `3,` → `3, 2,` → `3, 2, 1...`.
+3. **"Let's go!"**: aparece centrado y se invoca `onComplete()`. La línea de terminal se desvanece simultáneamente.
+
+#### API
+
+```ts
+interface KalAmaricoIntroProps {
+  onComplete?: () => void
+  style?: React.CSSProperties
+  className?: string
+}
+```
+
+`onComplete` se dispara una sola vez cuando aparece "Let's go!". El consumidor (Hero) la usa para hacer `setMode('piano')`.
+
+#### Hook interno `useTerminalIntro`
+
+Maneja el state de fase (`'typing' | 'countdown' | 'letsgo'`), el texto actualmente tipeado, y el contador. Auto-arranca en mount. Limpia sus timers en unmount vía `cancelRef + clearTimers()`.
+
+#### Posicionamiento en Hero
+
+Se monta dentro del `.hero-stage` envuelto en un `.hero-intro-slot` con `position: absolute; top: 50%; transform: translateY(-50%)`. Ocupa el ancho del stage (que coincide con el del h1) y mantiene su altura fija de 200px. Con `pointer-events: none` para que el cursor no interactúe.
 
 ---
 
@@ -449,22 +499,21 @@ El hook `useKalamaricoAvatar` también consulta `matchMedia('(prefers-reduced-mo
    - Reveal escalonado: header (80ms) → hero-stage (220ms) → role (360ms) → footer (500ms).
    - Avatar arranca su loop random tras un warm-up `smile` a los 5s.
    - Mensaje ASCII `KALAMARICO` en consola del navegador (easter egg).
-   - El timer del modo piano **no arranca**: está esperando interacción.
+   - Hero está esperando el primer gesture; `mode = 'text'`.
 
 2. **Primer gesture** (click o keydown en cualquier sitio).
-   - Hero: `hasInteractedRef = true`, `scheduleIdle()` arranca el timer de 12s.
+   - Hero: `hasInteractedRef = true`, `startIntro()` cambia `mode` a `'intro'` (o a `'piano'` si reduced-motion).
    - useFFTPiano: `unlock` crea `AudioContext`, lo resume, hace play/pause silencioso del media element.
    - App: el click handler global dispara `tryPlay(surprised)` → avatar hace cara de sorpresa con burst naranja.
+   - CSS reacciona a `data-mode='intro'`: letras del h1 caen en cascada, `Senior Frontend Developer` se desvanece. El componente `KalAmaricoIntro` emerge en el área del h1 y arranca su typewriter.
 
-3. **Hover sobre KALAMARICO**.
-   - `handleTitleEnter`: dispara `onTitleHover` → `tryPlayRandom()` → avatar hace una animación aleatoria con burst de su paleta.
-   - **El timer no se afecta** — sigue corriendo aunque el cursor esté sobre el h1.
+3. **Hover sobre KALAMARICO** (durante text).
+   - `handleTitleEnter`: dispara `onTitleHover` → `tryPlayRandom()` → avatar hace una animación aleatoria con burst de su paleta. **No afecta al modo**.
 
-4. **12s desde el primer gesture → modo piano**.
-   - `setMode('piano')` → fluye via `onModeChange` a App → `heroMode = 'piano'`.
-   - CSS reacciona a `data-mode='piano'` en `.hero`:
-     - Letras de `KALAMARICO` caen en cascada (45ms stagger).
-     - `Senior Frontend Developer` se desvanece.
+4. **Intro completa (~17s, "Let's go!") → modo piano**.
+   - `KalAmaricoIntro` invoca `onComplete` → `handleIntroComplete` → `setMode('piano')`.
+   - El intro se desmonta. CSS de `data-mode='piano'`:
+     - Letras del h1 siguen caídas (mismo selector cubre `intro` y `piano`).
      - Piano emerge desde abajo (180ms de retraso, 420ms duración).
      - h1 deja de capturar pointer events; piano los captura.
    - Avatar: `paused=true`, loop random detenido. Display override → `grimace` estático.
@@ -477,16 +526,25 @@ El hook `useKalamaricoAvatar` también consulta `matchMedia('(prefers-reduced-mo
    - Burst naranja aparece sobre el avatar.
    - Tras 900ms, state vuelve a `'normal'` → display override → `grimace` de nuevo.
 
-6. **Hover sobre el piano** o **canción terminada**.
-   - Ambos disparan `exitPianoMode` (callback compartido entre `onPointerEnter` y `onEnded`).
-   - `setMode('text')`, activa `ignoreNextTitleEnterRef` (600ms).
+6. **Canción terminada**.
+   - El `<audio>` dispara `onEnded` → `exitPianoMode`.
+   - `setMode('text')`, marca `pianoDisabledRef = true` (modo piano deshabilitado para el resto de la sesión), activa `ignoreNextTitleEnterRef` (600ms).
    - useFFTPiano: `playing=false` → cleanup → `audio.pause()`, RAF cancelado.
    - Avatar: `paused=false` → loop random vuelve.
    - CSS: piano fade-out, h1 reaparece (letras en cascada inversa con `--i-rev`), role vuelve.
-   - `scheduleIdle()` rearma el timer de 12s.
+   - **No se rearma el timer**. La sesión sigue en modo texto normal y ya no hay más ciclos de piano.
 
-7. **Sin interacción tras volver del piano**.
-   - El timer corre 12s y vuelve a entrar al modo piano (el hover sobre el h1 no lo afecta).
+> El modo piano ocurre **una sola vez por sesión**. El usuario lo experimenta como un easter-egg que arranca con el primer click, tras una intro narrativa de ~17s, y dura lo que dure la canción. Cuando termina, la página vuelve a ser un hero estático normal hasta que se recargue.
+
+### Rama alternativa — fallo de audio
+
+Si en cualquier punto el hook detecta un fallo definitivo (unlock o `audio.play()` rechaza):
+
+1. `notifyFailure` loguea un único `console.warn` con la razón.
+2. Se invoca `onAudioFailed` (idempotente).
+3. Hero marca `pianoDisabledRef = true` y sale a modo texto si estaba en intro o piano.
+4. A partir de aquí, ningún `startIntro` arranca el intro (guard) y ningún `handleIntroComplete` salta a piano.
+5. El usuario ve la página en modo texto normal hasta el final de la sesión. Recargar la página es la única forma de reintentarlo.
 
 ---
 
@@ -541,9 +599,45 @@ Bug sutil: al pasar de modo piano a texto (vía hover en piano), las letras del 
 
 Fix: un flag de un solo disparo, válido 600ms. El primer `mouseenter` tras `exitPianoMode` se ignora; los posteriores funcionan normal.
 
-### 6.9 El hover sobre el h1 no afecta al timer
+### 6.9 El hover sobre el h1 no afecta al modo
 
-El timer arranca con la primera interacción global y solo se rearma desde `exitPianoMode`. Hacer hover sobre el h1 dispara la animación random del avatar pero **no toca el timer** — el contador sigue corriendo aunque el cursor esté quieto sobre el título. Decisión deliberada del usuario: el modo piano no debe depender de dónde esté el cursor en el hero.
+Hacer hover sobre el h1 dispara la animación random del avatar pero **no toca el modo** — la transición a intro/piano depende solo del primer gesture global y luego del `onComplete` del intro.
+
+### 6.10 El modo piano se activa una sola vez por sesión
+
+Decisión: el modo piano es un easter-egg one-shot. Se activa una vez (tras el primer gesture y la intro de ~17s) y, cuando la canción termina (o falla el audio), queda deshabilitado para el resto de la sesión.
+
+Razones:
+- **No es interactivo**: no es un reproductor de música; es una pequeña pieza ambiental. Una vez vista, no aporta valor repetirla.
+- **No se puede salir manualmente**: el hover sobre el piano no hace nada. La única forma de "volver" es esperar a que la canción acabe.
+- **No vuelve solo**: tras terminar, no hay más entradas a intro ni piano. El usuario ve la página normal hasta recargar.
+
+El flag `pianoDisabledRef` (en Hero) se vuelve `true` en dos casos: (a) `exitPianoMode` (canción terminada), (b) `handleAudioFailed` (fallo de audio). Los guards de `startIntro` y `handleIntroComplete` impiden cualquier reprogramación futura. La diferencia entre ambos casos:
+
+| Caso | ¿Llegó a verse el piano? | Tras el bloqueo |
+| --- | --- | --- |
+| Canción terminada | Sí, ciclo completo | Modo texto normal hasta recargar |
+| Fallo de audio | A veces (race del primer `start()`); si pasa, se sale inmediatamente | Modo texto normal hasta recargar; un `console.warn` documenta la razón |
+
+Trade-offs aceptados:
+- **Sin UI de error**: si el audio falla, el usuario nunca lo nota — la página parece no tener la feature. Aceptable: el modo piano es un easter-egg, no un funcional crítico.
+- **Sin reintento**: ni el ciclo completado ni el fallo se pueden "rebajar". Recargar es el camino. Mantiene la lógica simple.
+- **Un único `console.warn` por sesión** ante fallos: idempotente vía `failureLoggedRef` en el hook.
+
+### 6.11 Intro narrativa en lugar de timer ciego
+
+Antes, el modo piano arrancaba tras 12s de inactividad sin más. El usuario tenía que adivinar qué hacía la página o esperar sin contexto.
+
+Ahora, el primer gesture activa la intro `KalAmaricoIntro` (~17s de typewriter + countdown + "Let's go!") que actúa como **anuncio explícito** del modo piano. La transición es más narrativa, da contexto, y elimina la incógnita de "¿qué hace esta página si me quedo quieto?".
+
+Beneficios laterales:
+- **El gesture activa el ciclo entero**: ya no hay disonancia entre "click para desbloquear audio" y "12s para que pase algo". Un click → empieza la intro → empieza el piano.
+- **No depende de la inactividad**: usuarios que interactúan rápido con la página no se pierden el easter-egg.
+- **Aprovecha el tiempo de carga del MP3**: durante los 17s del intro, el navegador puede precargar el audio (`preload="auto"`).
+
+Contras:
+- **El gesture no puede ser sutil**: cualquier click (incluso en un enlace social) lo activa. Si el usuario está navegando con teclado, basta un keydown. Aceptable: la intro es bonita y dura 17s; si molesta, basta esperar a que termine y vuelva al estado normal tras la canción.
+- **Se respeta `prefers-reduced-motion`** saltando el intro y yendo directo al piano. La intro es animada y no tiene "modo plano".
 
 ---
 
@@ -592,8 +686,11 @@ El timer arranca con la primera interacción global y solo se rearma desde `exit
 `Hero.tsx`:
 - `TITLE` (`'KALAMARICO'`)
 - `ROLE` (`'Senior Frontend Developer'`)
-- `IDLE_MS` (12000)
 - `AUDIO_SRC` (`'/audio/piano.mp3'`)
+
+`KalAmaricoIntro.tsx`:
+- `LINES[]`: textos, velocidad de tipeo (`spd`) y pausa de lectura (`read`) por línea.
+- Timings del countdown (hardcoded `780ms`, `780ms`, `500ms`).
 
 `HeroPiano.tsx`:
 - `WHITE_COUNT` (29)
@@ -623,8 +720,9 @@ El timer arranca con la primera interacción global y solo se rearma desde `exit
 | --- | --- |
 | `main.tsx` | Bootstrapping React + carga fuente + easter egg consola |
 | `App.tsx` | Composición raíz, owner del avatar y heroMode mirror |
-| `Hero.tsx` | Estado del modo (text/piano), idle timer, hover guards |
+| `Hero.tsx` | Estado del modo (text/intro/piano), guards, gestión de transiciones |
 | `HeroPiano.tsx` | DOM del piano, mount del `<audio>`, integración useFFTPiano |
+| `KalAmaricoIntro.tsx` | Intro terminal animado (~17s) que precede al modo piano |
 | `KalamaricoAvatar.tsx` | Sprite, `useKalamaricoAvatar` (loop random + tryPlay) |
 | `SocialLinks.tsx` | Iconos SVG inline + enlaces footer |
 | `useFFTPiano.ts` | AudioContext + Analyser + RAF + onset detection |
