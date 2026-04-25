@@ -577,7 +577,7 @@ Hook que muestra el texto **"click anywhere"** acompañado de ondas concéntrica
 
 #### API
 
-- `start(excludeSelectors: string[], opts?: ClickHintsOptions)` — programa un timer recursivo que spawnea un hint cada 0.9-1.7s en una posición válida.
+- `start(excludeSelectors: string[], opts?: ClickHintsOptions)` — programa un timer recursivo que spawnea un hint cada 1.7-2.1s en una posición válida.
 - `stop()` — cancela el timer y limpia los hints activos.
 - `ClickHintsLayer` — componente que portaliza a `document.body` los hints con sus estilos inline.
 
@@ -586,14 +586,15 @@ Hook que muestra el texto **"click anywhere"** acompañado de ondas concéntrica
 Cada spawn pide una posición:
 1. Lee `getBoundingClientRect()` de los selectores excluidos (`.site-header`, `.hero`, `.site-footer`).
 2. Genera un `(x, y)` aleatorio dentro del viewport con margen (40px del borde).
-3. Si cae dentro de cualquier rectángulo excluido + padding (24px), reintenta hasta 12 veces.
-4. Si no encuentra hueco, salta esa ronda (mobile estrecho puede tener pocos huecos).
+3. Si cae dentro de cualquier rectángulo excluido + padding (24px), reintenta.
+4. Si cae a menos de 160px de la posición previa (`lastPositionRef`), reintenta — evita que dos hints consecutivos aparezcan en el mismo sitio por azar.
+5. Hasta 16 intentos. Si no encuentra hueco, salta esa ronda (mobile estrecho puede tener pocos huecos).
 
 #### Visual
 
 Cada hint:
 - 3 ondas concéntricas (10px iniciales, escalan ×8 en 1.4s) con delay escalonado 0/220/440ms, color accent `#e0a0ff`.
-- Texto "click anywhere" en monospace 11px, color `rgba(255,255,255,0.62)`, posicionado 22px sobre el centro de las ondas.
+- Texto "click anywhere" en monospace 13px, color `rgba(255,255,255,0.62)`, posicionado 22px sobre el centro de las ondas.
 - Animación del texto: fade-in subiendo + fade-out subiendo (1.6s total).
 
 Auto-cleanup tras 1.6s + 100ms de buffer.
@@ -629,7 +630,7 @@ App también guard contra `prefers-reduced-motion: reduce` antes de `startHints`
    - Reveal escalonado: header (80ms) → hero-stage (220ms) → role (360ms) → footer (500ms).
    - Avatar arranca su loop random tras un warm-up `smile` a los 3s.
    - Mensaje ASCII `KALAMARICO` en consola del navegador (easter egg).
-   - **Click hints** empiezan a aparecer aleatoriamente cada 0.9-1.7s: texto "click anywhere" + ondas expansivas color accent, en posiciones del viewport que no chocan con header / hero / footer.
+   - **Click hints** empiezan a aparecer aleatoriamente cada 1.7-2.1s: texto "click anywhere" + ondas expansivas color accent, en posiciones del viewport que no chocan con header / hero / footer.
    - Hero está esperando el primer gesture; `mode = 'text'`.
 
 2. **Primer gesture** (click o keydown en cualquier sitio).
@@ -878,7 +879,8 @@ Las notas musicales spawnean cada 340ms a ritmo fijo, no en los onsets reales de
 
 `useClickHints.tsx` (constantes hardcoded, sobrescribibles vía `opts` en `start`):
 - `text` (`'click anywhere'`)
-- `intervalMs` (`[900, 1700]` — gap aleatorio entre hints)
+- `intervalMs` (`[1700, 2100]` — gap aleatorio entre hints)
+- `MIN_DIST_FROM_LAST` (160 px — distancia mínima entre dos spawns consecutivos para evitar que aparezcan demasiado cerca)
 - `excludePadding` (24 px de margen alrededor de los rectángulos excluidos)
 - `viewportPadding` (40 px de margen al borde del viewport)
 - `HINT_DURATION` (1600 ms — vida total del hint)

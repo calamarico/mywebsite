@@ -18,7 +18,7 @@ import { createPortal } from 'react-dom'
 export interface ClickHintsOptions {
   /** Texto del hint (default: 'click anywhere') */
   text?: string
-  /** Intervalo mínimo/máximo entre hints en ms (default: [900, 1700]) */
+  /** Intervalo mínimo/máximo entre hints en ms (default: [1700, 2100]) */
   intervalMs?: [number, number]
   /** Padding alrededor de los rectángulos excluidos en px (default: 24) */
   excludePadding?: number
@@ -39,6 +39,10 @@ interface Hint {
 const HINT_DURATION = 1600
 const RIPPLE_COLOR  = '#e0a0ff'
 const TEXT_COLOR    = 'rgba(255, 255, 255, 0.62)'
+// Distancia mínima entre dos spawns consecutivos. Sin esto, dos
+// `Math.random()` seguidos pueden caer muy cerca y dar la impresión de que
+// el hint "no se mueve".
+const MIN_DIST_FROM_LAST = 160
 
 export function useClickHints() {
   const [hints, setHints] = useState<Hint[]>([])
@@ -46,18 +50,20 @@ export function useClickHints() {
   const counterRef        = useRef(0)
   const excludeSelectorsRef = useRef<string[]>([])
   const optsRef           = useRef<ClickHintsOptions>({})
+  const lastPositionRef   = useRef<{ x: number; y: number } | null>(null)
 
   const pickPosition = useCallback((): { x: number; y: number } | null => {
     const opts = optsRef.current
     const pad = opts.excludePadding ?? 24
     const vpad = opts.viewportPadding ?? 40
+    const last = lastPositionRef.current
 
     const excludeRects = excludeSelectorsRef.current
       .map((sel) => document.querySelector(sel))
       .filter((el): el is Element => Boolean(el))
       .map((el) => el.getBoundingClientRect())
 
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 16; i++) {
       const x = vpad + Math.random() * Math.max(0, window.innerWidth - vpad * 2)
       const y = vpad + Math.random() * Math.max(0, window.innerHeight - vpad * 2)
       const blocked = excludeRects.some(
@@ -67,7 +73,13 @@ export function useClickHints() {
           y >= r.top - pad &&
           y <= r.bottom + pad,
       )
-      if (!blocked) return { x, y }
+      if (blocked) continue
+      if (last) {
+        const dx = x - last.x
+        const dy = y - last.y
+        if (Math.sqrt(dx * dx + dy * dy) < MIN_DIST_FROM_LAST) continue
+      }
+      return { x, y }
     }
     return null
   }, [])
@@ -77,6 +89,7 @@ export function useClickHints() {
     const text = opts.text ?? 'click anywhere'
     const pos = pickPosition()
     if (!pos) return // sin hueco válido esta ronda
+    lastPositionRef.current = pos
 
     const hint: Hint = {
       id:       ++counterRef.current,
@@ -95,6 +108,7 @@ export function useClickHints() {
   const stop = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = null
+    lastPositionRef.current = null
     setHints([])
   }, [])
 
@@ -104,7 +118,7 @@ export function useClickHints() {
       excludeSelectorsRef.current = excludeSelectors
       optsRef.current = opts
 
-      const [minMs, maxMs] = opts.intervalMs ?? [900, 1700]
+      const [minMs, maxMs] = opts.intervalMs ?? [1700, 2100]
       const range = Math.max(0, maxMs - minMs)
 
       const scheduleNext = () => {
@@ -174,7 +188,7 @@ export function useClickHints() {
                 top: -22,
                 fontFamily:
                   'ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Mono", monospace',
-                fontSize: 11,
+                fontSize: 13,
                 letterSpacing: '0.5px',
                 color: TEXT_COLOR,
                 whiteSpace: 'nowrap',
