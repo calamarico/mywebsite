@@ -148,6 +148,9 @@ export function KalAmaricoIntro({ onComplete, style, className }: KalAmaricoIntr
           font-size: clamp(10px, 2.4vw, 18px);
           color: #fff;
           text-align: center;
+          /* line-height generoso: cuando una frase wrappea a 2+ líneas (mobile),
+             mantiene legibilidad sin que las líneas se peguen. */
+          line-height: 1.7;
           /* pre-wrap + break-word: las líneas largas wrappean en mobile como
              un terminal real cuando llegan al borde, en lugar de cortarse. */
           white-space: pre-wrap;

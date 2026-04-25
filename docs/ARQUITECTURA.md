@@ -501,9 +501,13 @@ Se monta dentro del `.hero-stage` envuelto en un `.hero-intro-slot` con `positio
 
 #### Tipografía responsive
 
-`.kala-terminal` usa `font-size: clamp(10px, 2.4vw, 18px)` y `.kala-letsgo` `clamp(13px, 3vw, 22px)`. El cursor está en unidades `em` (`width: 0.78em; height: 1em`) para escalar con la fuente.
+`.kala-terminal` usa `font-size: clamp(10px, 2.4vw, 18px)` con `line-height: 1.7` y `.kala-letsgo` `clamp(13px, 3vw, 22px)`. El cursor está en unidades `em` (`width: 0.78em; height: 1em`) para escalar con la fuente.
 
-Las líneas largas (54-55 chars) no caben aunque el slot llegue a 720px; se permite wrap con `white-space: pre-wrap; word-break: break-word`. El typewriter en mobile se siente como un terminal real cuando una frase es más larga que la anchura disponible: la línea continúa abajo en lugar de cortarse.
+Las líneas largas (54-55 chars) no caben aunque el slot llegue a 720px; se permite wrap con `white-space: pre-wrap; word-break: break-word`. El typewriter en mobile se siente como un terminal real cuando una frase es más larga que la anchura disponible: la línea continúa abajo en lugar de cortarse. El `line-height: 1.7` da suficiente aire entre líneas wrappeadas para mantener legibilidad.
+
+#### Background
+
+`.kala-intro` es `background: transparent` (no rectángulo negro). Deja ver el `--bg` del `<body>` con su radial-gradient, integrando el intro visualmente con el resto de la página.
 
 > Detalle técnico: `.kala-terminal` es flex item del `.kala-intro` (centrado vertical y horizontal). Necesita `min-width: 0` para que el `max-width: 100%` se respete y el wrap suceda — sin esa regla, el flex item por defecto crece a la anchura intrínseca del contenido y desborda.
 
