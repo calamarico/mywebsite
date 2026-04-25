@@ -82,7 +82,7 @@ function useTerminalIntro(onComplete?: () => void) {
     await sleep(780)
     if (!ok()) return
 
-    setCountdown('3, 2, 1...')
+    setCountdown('3, 2, 1')
     await sleep(500)
     if (!ok()) return
 

@@ -45,13 +45,13 @@ function App() {
 
   const { state, tryPlay, tryPlayRandom } = useKalamaricoAvatar({
     onAnimationStart,
-    paused: heroMode === 'piano',
+    whistle: heroMode === 'piano',
   })
 
   useEffect(() => {
     const onClick = () => {
-      // Durante el modo piano el avatar se queda en `grimace` puro: ningún
-      // click dispara animaciones para no romper la atmósfera.
+      // Durante el modo piano el avatar está silbando en bucle: ningún
+      // click interrumpe la animación para no romper la atmósfera.
       if (heroModeRef.current === 'piano') return
       void tryPlay(ANIMATIONS.surprised)
     }
@@ -74,16 +74,12 @@ function App() {
     return () => stopNotes()
   }, [heroMode, startNotes, stopNotes])
 
-  // En modo piano mostramos el frame estático de grimace. Como el click ya no
-  // dispara `surprised` y el loop está pausado, no hace falta excepción.
-  const displayState = heroMode === 'piano' ? 'grimace' : state
-
   return (
     <>
       {container}
       <MusicalNotesLayer />
       <header className="site-header" data-reveal="1">
-        <KalamaricoAvatar ref={avatarRef} state={displayState} size={64} />
+        <KalamaricoAvatar ref={avatarRef} state={state} size={64} />
         <span className="handle">@calamarico</span>
       </header>
       <main className="site-main">

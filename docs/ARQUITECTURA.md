@@ -38,7 +38,7 @@ mywebsite/
 │   ├── App.tsx                 # composición raíz (header, main, footer)
 │   ├── main.tsx                # entrada React + carga de fuente + easter-egg ASCII en consola
 │   ├── assets/
-│   │   ├── kalamarico_sprite_v2.png   # sprite sheet del avatar (14 frames × 256px)
+│   │   ├── kalamarico_sprite_v3.png   # sprite sheet del avatar (17 frames × 256px)
 │   │   └── mm_bernard.jpeg            # favicon
 │   ├── components/
 │   │   ├── Hero.tsx            # h1, gestión del modo (text/intro/piano)
@@ -105,7 +105,7 @@ Mecanismo que evita FOUC y entrega una entrada escalonada:
 
 ### 4.3 Avatar — `KalamaricoAvatar.tsx`
 
-Sprite sheet horizontal con 14 frames (256×256 cada uno). El componente `<KalamaricoAvatar>` recibe un `state: AvatarState` y calcula `background-position` para mostrar el frame correcto.
+Sprite sheet horizontal con 17 frames (256×256 cada uno). El componente `<KalamaricoAvatar>` recibe un `state: AvatarState` y calcula `background-position` para mostrar el frame correcto. Frames: `normal, surprised, blink, smile, grimace, electro1-2, hold1-2, blue1-2, purple1-3, whistle1-3`.
 
 #### Animaciones definidas
 
@@ -117,10 +117,11 @@ ANIMATIONS = {
   grimace:      ['grimace', 'normal']                      // 900ms
   electrocuted: 16 frames con timings progresivos          // ~1770ms
   holdBreath:   16 frames con paleta hold→blue→purple      // ~3750ms
+  whistle:      8 frames con patrón whistle1/whistle3 asimétrico  // 1760ms loopable
 }
 ```
 
-Cada animación es un objeto `{ frames, frameDuration }` que el hook ejecuta secuencialmente con `setState` + `await wait(ms)`.
+Cada animación es un objeto `{ frames, frameDuration }` que el hook ejecuta secuencialmente con `setState` + `await wait(ms)`. La animación `whistle` es especial: **no termina en `'normal'`** — está diseñada para encadenarse en bucle desde el effect del hook (modo piano).
 
 #### Hook `useKalamaricoAvatar`
 
@@ -129,25 +130,30 @@ Expone un **controller** con:
 | Método | Comportamiento |
 | --- | --- |
 | `state` | Frame actual del avatar |
-| `tryPlay(anim)` | Ejecuta una animación. Devuelve `false` si `busyRef === true` (otra animación corriendo). |
+| `tryPlay(anim)` | Ejecuta una animación. Devuelve `false` si `busyRef === true` (otra animación corriendo). Comprueba `cancelRef` entre frames para abortar limpio. |
 | `tryPlayRandom()` | Elige una del `RANDOM_POOL` evitando repetir la última. |
 
 #### Loop interno
 
-`useEffect` con dos modos según la opción `paused`:
+`useEffect` con dos modos según la opción `whistle`:
 
-- **Activo (`paused === false`)**:
+- **`whistle === false` (random loop)**:
   1. Espera 5s al mount inicial.
   2. Ejecuta `tryPlay(smile)` como warm-up.
   3. Bucle infinito: `await wait(2000–8000ms)` aleatorio + `tryPlayRandom()`.
-- **Pausado (`paused === true`)**: el effect retorna sin hacer nada. El loop interno no consume recursos.
+- **`whistle === true` (piano mode)**:
+  1. Bucle inmediato: `await tryPlay(ANIMATIONS.whistle)` encadenado sin gap. Cada ciclo dura 1760ms (8 frames × 220ms).
+  2. El loop respeta `cancelRef` entre ciclos para parar limpio cuando cambia el prop.
 
-El cleanup del effect:
+El cleanup del effect (común a ambos modos):
 - Cancela timers (`clearTimeout` sobre `timersRef`).
-- Hace `setState('normal')` defensivo — evita que el avatar quede atascado en un frame intermedio si el loop se cancela mid-animación.
+- Marca `cancelRef.current = true` para que `tryPlay` aborte entre frames.
+- Hace `setState('normal')` defensivo — evita que el avatar quede atascado en un frame intermedio (importante al salir del modo whistle: si no, se quedaría con la boca abierta).
 - Resetea `busyRef.current = false` por si una animación huérfana lo dejó colgado.
 
-> **Decisión**: `tryPlay` y `tryPlayRandom` **no** consultan `cancelRef`. Solo consultan `busyRef`. Esto permite que llamadas externas (como el click handler de App) funcionen incluso cuando el loop interno está cancelado por `paused`.
+> **Por qué un único effect comparte ambos modos**: el cleanup uniforme (`cancelRef + clearTimers + setState('normal')`) garantiza que cualquier transición entre modos deje el avatar en estado limpio. Versiones anteriores intentaron un loop separado fuera del hook y se enredaron con races (ver §6.2).
+
+> **Decisión**: `tryPlay` y `tryPlayRandom` consultan `busyRef` para evitar solapamiento. `tryPlay` también respeta `cancelRef` entre frames para abortar limpio durante una transición de modo.
 
 ### 4.4 Partículas — `usePixelParticles.tsx`
 
@@ -433,16 +439,24 @@ Coreografía CSS controlada por `data-mode` en `.hero`.
 
 #### Avatar
 
-App calcula el `displayState` mostrado al avatar:
+App pasa el `state` real del hook directamente al componente — sin override. Durante el modo piano, el avatar refleja los frames de `whistle` que el propio hook está reproduciendo en bucle.
 
 ```ts
-const displayState = heroMode === 'piano' ? 'grimace' : state
+<KalamaricoAvatar state={state} ... />
 ```
 
-- En modo piano: muestra siempre `grimace` puro. El click global no dispara `surprised` (ver §6.12) y el loop random está pausado, así que `state` no cambia durante piano. La fórmula se simplifica a un override directo.
-- En modo texto/intro: pasa el state real del hook.
+El control del comportamiento se hace vía la opción del hook:
 
-Adicionalmente, el hook recibe `paused: heroMode === 'piano'` que detiene su loop interno (no se disparan animaciones random durante el modo piano).
+```ts
+useKalamaricoAvatar({
+  onAnimationStart,
+  whistle: heroMode === 'piano',
+})
+```
+
+- Cuando `heroMode === 'piano'`: el hook arranca un loop continuo de `ANIMATIONS.whistle` (4 frames × 150ms en bucle). El avatar silba sincronizado con la música.
+- Cuando `heroMode !== 'piano'`: el hook ejecuta su loop random normal.
+- Al cambiar el prop, el cleanup del effect (común a ambos modos) deja el avatar en `'normal'` antes de re-arrancar con el otro modo.
 
 ### 4.9 `prefers-reduced-motion`
 
@@ -497,13 +511,13 @@ Maneja el state de fase (`'typing' | 'countdown' | 'letsgo'`), el texto actualme
 
 #### Posicionamiento en Hero
 
-Se monta dentro del `.hero-stage` envuelto en un `.hero-intro-slot` con `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%)`. La anchura es `min(calc(100vw - 24px), 720px)` — rompe la inline-block trap del `.hero-stage` (que sigue la anchura del h1, demasiado estrecha en mobile) y se ancla al centro horizontal. Mantiene altura fija de 200px y `pointer-events: none`.
+Se monta dentro del `.hero-stage` envuelto en un `.hero-intro-slot` con `position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%)`. La anchura es `min(calc(100vw - 24px), 1100px)` — rompe la inline-block trap del `.hero-stage` (que sigue la anchura del h1, demasiado estrecha en mobile) y se ancla al centro horizontal. En desktop ocupa hasta 1100px para que las frases largas no wrappeen y la presencia visual sea más cinematográfica. Mantiene altura fija de 200px y `pointer-events: none`.
 
 #### Tipografía responsive
 
 `.kala-terminal` usa `font-size: clamp(10px, 2.4vw, 18px)` con `line-height: 1.7` y `.kala-letsgo` `clamp(13px, 3vw, 22px)`. El cursor está en unidades `em` (`width: 0.78em; height: 1em`) para escalar con la fuente.
 
-Las líneas largas (54-55 chars) no caben aunque el slot llegue a 720px; se permite wrap con `white-space: pre-wrap; word-break: break-word`. El typewriter en mobile se siente como un terminal real cuando una frase es más larga que la anchura disponible: la línea continúa abajo en lugar de cortarse. El `line-height: 1.7` da suficiente aire entre líneas wrappeadas para mantener legibilidad.
+En desktop (slot hasta 1100px) las frases largas caben en una sola línea. En mobile no caben aunque la fuente esté reducida; se permite wrap con `white-space: pre-wrap; word-break: break-word`. El typewriter se siente como un terminal real cuando una frase es más larga que la anchura disponible: la línea continúa abajo en lugar de cortarse. El `line-height: 1.7` da suficiente aire entre líneas wrappeadas para mantener legibilidad.
 
 #### Background
 
@@ -581,14 +595,14 @@ El hook trae sus propios keyframes inline, fuera del alcance del media query glo
      - Letras del h1 siguen caídas (mismo selector cubre `intro` y `piano`).
      - Piano emerge desde abajo (180ms de retraso, 420ms duración).
      - h1 deja de capturar pointer events; piano los captura.
-   - Avatar: `paused=true`, loop random detenido. Display override → `grimace` estático.
+   - Avatar: el hook recibe `whistle=true` → cleanup del random loop → arranca el loop continuo de `ANIMATIONS.whistle` (8 frames alternando whistle1/whistle3 con patrón asimétrico, 1760ms por ciclo).
    - useFFTPiano: `playing=true` → `audio.currentTime=0`, `audio.play()`, RAF arranca.
    - El MP3 suena. Las teclas se iluminan en lavanda siguiendo el FFT.
    - App arranca `useMusicalNotes` → notas `♩ ♪ ♫ ♬` empiezan a flotar hacia arriba alrededor del avatar (rate 340ms, paleta lavanda/blanco).
 
 5. **Click durante modo piano**.
    - El click handler de App entra y comprueba `heroModeRef.current === 'piano'` → `return`.
-   - **No se dispara `surprised`** ni se emite burst. El avatar permanece en el frame `grimace` puro.
+   - **No se dispara `surprised`** ni se emite burst. El avatar sigue silbando ininterrumpidamente.
    - Las notas musicales siguen flotando con normalidad.
 
 6. **Canción terminada**.
@@ -596,7 +610,7 @@ El hook trae sus propios keyframes inline, fuera del alcance del media query glo
    - `setMode('text')`, marca `pianoDisabledRef = true` (modo piano deshabilitado para el resto de la sesión), activa `ignoreNextTitleEnterRef` (600ms).
    - useFFTPiano: `playing=false` → cleanup → `audio.pause()`, RAF cancelado.
    - App detecta cambio de `heroMode` → llama `stopNotes()` → no se spawnan notas nuevas; las notas activas terminan su animación pendiente y se limpian solas.
-   - Avatar: `paused=false` → loop random vuelve.
+   - Avatar: el hook recibe `whistle=false` → cleanup deja el avatar en `'normal'` → re-arranca el random loop (5s de warm-up + smile + bucle aleatorio).
    - CSS: piano fade-out, h1 reaparece (letras en cascada inversa con `--i-rev`), role vuelve.
    - **No se rearma el timer**. La sesión sigue en modo texto normal y ya no hay más ciclos de piano.
 
@@ -621,15 +635,19 @@ Si en cualquier punto el hook detecta un fallo definitivo (unlock o `audio.play(
 - **Avatar**: pocas animaciones, breves, async basado en `setState` + `await wait()`. Cada animación es declarativa (`{ frames, frameDuration }`). Ideal para el comportamiento "vivo" del avatar (parpadeo, cara, etc.).
 - **Piano FFT**: 60 fps, hasta varias decenas de pulsaciones por segundo. Aquí `setState` por cada flash sería catastrófico. Por eso DOM imperativo con refs y `dataset.pressed`.
 
-### 6.2 Frame estático en el avatar (no animación de loop)
+### 6.2 Loop de silbido durante modo piano (en lugar de frame estático)
 
-Inicialmente el plan era poner el avatar en bucle de `grimace` cuando entrara al modo piano. Resultó complejo:
+Iteración 1 (descartada): bucle de `grimace` durante piano vía un loop separado fuera del hook → race conditions con `cancelRef` cuando el `useEffect` se re-ejecutaba, `tryPlay` huérfano dejaba `busyRef` colgado, UI congelada.
 
-- Race conditions con el `cancelRef` cuando el `useEffect` se re-ejecutaba.
-- `tryPlay` huérfano dejaba `busyRef` colgado, bloqueando el click.
-- UI se congelaba en spin del while-loop del bucle forzado.
+Iteración 2 (provisional): **frame estático `grimace`** vía override de `displayState` en App.tsx, con prop `paused` desactivando el loop interno. Funcionó pero el avatar quedaba inerte durante la canción y compitiendo visualmente con las notas musicales.
 
-Solución final: **el avatar muestra el frame estático `grimace`** vía override de la prop `state` en App.tsx. El loop interno se pausa con `paused`, pero `tryPlay` y `tryPlayRandom` siguen disponibles para llamadas manuales (el click handler).
+Iteración 3 (actual): se añadieron 3 frames de silbido al sprite (v3) y una nueva animación `whistle` de 4 frames loopable. **El loop vive dentro del mismo `useEffect` que el random loop**, gobernado por la prop `whistle`. Esto cambia la dinámica respecto a la iteración 1:
+
+- Un único cleanup (`cancelRef + clearTimers + setState('normal')`) cubre cualquier transición entre modos.
+- `tryPlay` ahora consulta `cancelRef` entre frames, así que aborta limpio cuando se cancela.
+- No hay loop externo en App: la única fuente de animación es el effect del hook.
+
+Resultado: avatar silbando en bucle durante toda la canción, transición limpia a/desde modo random sin frames atascados.
 
 ### 6.3 Por qué el `AudioContext` nunca se crea fuera de un gesture
 
@@ -707,10 +725,10 @@ Contras:
 
 ### 6.12 Click no dispara `surprised` en modo piano
 
-Durante el modo piano el avatar se queda en el frame `grimace` puro (concentrado tocando) y aparecen las notas musicales flotando a su alrededor. Permitir que el click dispare la animación `surprised` rompía esa atmósfera por dos razones:
+Durante el modo piano el avatar está silbando en bucle (8 frames whistle1/whistle3 alternados, 1760ms por ciclo) y aparecen las notas musicales flotando a su alrededor. Permitir que el click dispare la animación `surprised` rompía esa atmósfera por dos razones:
 
 - **Visualmente compite** con las notas musicales: el burst naranja de partículas se cruza con las notas lavanda y la composición se vuelve ruidosa.
-- **Narrativamente disonante**: el avatar acaba de prometer un "concert" en la intro; reaccionar al click con cara de sorpresa cada dos segundos quita seriedad.
+- **Narrativamente disonante**: el avatar acaba de prometer un "concert" en la intro y está silbando la canción; cortar la animación de silbido para meter una cara de sorpresa cada dos segundos rompe la inmersión.
 
 Implementación: un guard al inicio del click handler en App (`if (heroModeRef.current === 'piano') return`). Fuera del modo piano (texto e intro), el click sigue disparando `surprised` exactamente como antes. El ref espejo evita re-instalar el handler en cada cambio de modo.
 

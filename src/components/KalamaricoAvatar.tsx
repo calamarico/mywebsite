@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import spriteUrl from '../assets/kalamarico_sprite_v2.png'
+import spriteUrl from '../assets/kalamarico_sprite_v3.png'
 
 export type AvatarState =
   | 'normal'
@@ -16,6 +16,9 @@ export type AvatarState =
   | 'purple1'
   | 'purple2'
   | 'purple3'
+  | 'whistle1'
+  | 'whistle2'
+  | 'whistle3'
 
 export interface AvatarAnimation {
   frames: AvatarState[]
@@ -23,7 +26,7 @@ export interface AvatarAnimation {
 }
 
 const FRAME_SIZE = 256
-const FRAME_COUNT = 14
+const FRAME_COUNT = 17
 
 const STATE_INDEX: Record<AvatarState, number> = {
   normal: 0,
@@ -40,6 +43,9 @@ const STATE_INDEX: Record<AvatarState, number> = {
   purple1: 11,
   purple2: 12,
   purple3: 13,
+  whistle1: 14,
+  whistle2: 15,
+  whistle3: 16,
 }
 
 export const ANIMATIONS = {
@@ -99,6 +105,12 @@ export const ANIMATIONS = {
       0,
     ],
   },
+  // Pulso de silbido. NO termina en 'normal' — el ciclo es loopable y se
+  // encadena continuamente desde el effect del hook (modo piano).
+  whistle: {
+    frames: ['whistle1', 'whistle1', 'whistle3', 'whistle1', 'whistle1', 'whistle1', 'whistle3', 'whistle1'],
+    frameDuration: 220,
+  },
 } satisfies Record<string, AvatarAnimation>
 
 const RANDOM_POOL: AvatarAnimation[] = [
@@ -118,7 +130,13 @@ export interface KalamaricoController {
 
 export interface UseKalamaricoOptions {
   onAnimationStart?: (anim: AvatarAnimation) => void
-  paused?: boolean
+  /**
+   * Cuando true, en lugar del loop random reproduce `whistle` en bucle
+   * continuo. Cualquier transición (true→false o false→true) reusa la
+   * cleanup del effect (cancelRef + clearTimers + setState('normal')) para
+   * dejar el avatar en estado limpio antes del siguiente modo.
+   */
+  whistle?: boolean
 }
 
 export function useKalamaricoAvatar(
@@ -133,7 +151,7 @@ export function useKalamaricoAvatar(
   const onStartRef = useRef(options.onAnimationStart)
   onStartRef.current = options.onAnimationStart
 
-  const { paused = false } = options
+  const { whistle = false } = options
 
   const wait = useCallback(
     (ms: number) =>
@@ -159,6 +177,7 @@ export function useKalamaricoAvatar(
           : frames.map(() => frameDuration)
 
         for (let i = 0; i < frames.length; i++) {
+          if (cancelRef.current) break
           setState(frames[i])
           const delay = durations[i] ?? 0
           if (delay > 0) await wait(delay)
@@ -182,12 +201,21 @@ export function useKalamaricoAvatar(
   }, [tryPlay])
 
   useEffect(() => {
-    if (paused) return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
 
     cancelRef.current = false
 
     const loop = async () => {
+      if (whistle) {
+        // Loop continuo de silbido durante el modo piano.
+        while (!cancelRef.current) {
+          await tryPlay(ANIMATIONS.whistle)
+          if (cancelRef.current) return
+        }
+        return
+      }
+
+      // Loop random normal.
       await wait(5000)
       if (cancelRef.current) return
       await tryPlay(ANIMATIONS.smile)
@@ -206,14 +234,13 @@ export function useKalamaricoAvatar(
       cancelRef.current = true
       timersRef.current.forEach(clearTimeout)
       timersRef.current = []
-      // Defensive reset: una animación in-flight del loop podría dejar
-      // busyRef colgado al cancelar sus timers. Lo liberamos para que las
-      // llamadas externas a tryPlay (p.ej. surprised por click) sigan
-      // pudiendo ejecutarse durante el modo piano.
+      // Defensive reset: una animación in-flight (random o whistle) podría
+      // dejar busyRef colgado al cancelar sus timers. Lo liberamos para que
+      // las llamadas externas a tryPlay sigan pudiendo ejecutarse.
       busyRef.current = false
       setState('normal')
     }
-  }, [wait, tryPlay, tryPlayRandom, paused])
+  }, [wait, tryPlay, tryPlayRandom, whistle])
 
   return { state, tryPlay, tryPlayRandom }
 }
