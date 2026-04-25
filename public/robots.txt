@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://kalamarico.lol/sitemap.xml
+Sitemap: https://www.kalamarico.lol/sitemap.xml
