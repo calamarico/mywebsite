@@ -95,13 +95,13 @@ export const ANIMATIONS = {
       'normal',
     ],
     frameDuration: [
-      150, 150,
-      175, 175,
-      200, 200,
-      200, 200,
-      225, 225,
-      250, 250,
-      300, 300, 300,
+      60, 60,
+      70, 70,
+      80, 80,
+      80, 80,
+      90, 90,
+      100, 100,
+      120, 120, 120,
       0,
     ],
   },
@@ -216,12 +216,12 @@ export function useKalamaricoAvatar(
       }
 
       // Loop random normal.
-      await wait(5000)
+      await wait(3000)
       if (cancelRef.current) return
       await tryPlay(ANIMATIONS.smile)
 
       while (!cancelRef.current) {
-        const gap = 2000 + Math.random() * 6000
+        const gap = 1000 + Math.random() * 2000
         await wait(gap)
         if (cancelRef.current) return
         await tryPlayRandom()

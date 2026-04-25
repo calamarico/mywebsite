@@ -116,7 +116,7 @@ ANIMATIONS = {
   smile:        ['smile', 'normal']                        // 1000ms
   grimace:      ['grimace', 'normal']                      // 900ms
   electrocuted: 16 frames con timings progresivos          // ~1770ms
-  holdBreath:   16 frames con paleta hold→blue→purple      // ~3750ms
+  holdBreath:   16 frames con paleta hold→blue→purple      // ~1320ms
   whistle:      8 frames con patrón whistle1/whistle3 asimétrico  // 1760ms loopable
 }
 ```
@@ -138,9 +138,9 @@ Expone un **controller** con:
 `useEffect` con dos modos según la opción `whistle`:
 
 - **`whistle === false` (random loop)**:
-  1. Espera 5s al mount inicial.
+  1. Espera 3s al mount inicial.
   2. Ejecuta `tryPlay(smile)` como warm-up.
-  3. Bucle infinito: `await wait(2000–8000ms)` aleatorio + `tryPlayRandom()`.
+  3. Bucle infinito: `await wait(1000–3000ms)` aleatorio + `tryPlayRandom()`.
 - **`whistle === true` (piano mode)**:
   1. Bucle inmediato: `await tryPlay(ANIMATIONS.whistle)` encadenado sin gap. Cada ciclo dura 1760ms (8 frames × 220ms).
   2. El loop respeta `cancelRef` entre ciclos para parar limpio cuando cambia el prop.
@@ -576,7 +576,7 @@ El hook trae sus propios keyframes inline, fuera del alcance del media query glo
 
 1. **Carga inicial**.
    - Reveal escalonado: header (80ms) → hero-stage (220ms) → role (360ms) → footer (500ms).
-   - Avatar arranca su loop random tras un warm-up `smile` a los 5s.
+   - Avatar arranca su loop random tras un warm-up `smile` a los 3s.
    - Mensaje ASCII `KALAMARICO` en consola del navegador (easter egg).
    - Hero está esperando el primer gesture; `mode = 'text'`.
 
@@ -610,7 +610,7 @@ El hook trae sus propios keyframes inline, fuera del alcance del media query glo
    - `setMode('text')`, marca `pianoDisabledRef = true` (modo piano deshabilitado para el resto de la sesión), activa `ignoreNextTitleEnterRef` (600ms).
    - useFFTPiano: `playing=false` → cleanup → `audio.pause()`, RAF cancelado.
    - App detecta cambio de `heroMode` → llama `stopNotes()` → no se spawnan notas nuevas; las notas activas terminan su animación pendiente y se limpian solas.
-   - Avatar: el hook recibe `whistle=false` → cleanup deja el avatar en `'normal'` → re-arranca el random loop (5s de warm-up + smile + bucle aleatorio).
+   - Avatar: el hook recibe `whistle=false` → cleanup deja el avatar en `'normal'` → re-arranca el random loop (3s de warm-up + smile + bucle aleatorio).
    - CSS: piano fade-out, h1 reaparece (letras en cascada inversa con `--i-rev`), role vuelve.
    - **No se rearma el timer**. La sesión sigue en modo texto normal y ya no hay más ciclos de piano.
 
@@ -817,8 +817,8 @@ Las notas musicales spawnean cada 340ms a ritmo fijo, no en los onsets reales de
 `KalamaricoAvatar.tsx` (constantes hardcoded):
 - `RANDOM_POOL[]` (animaciones del loop random)
 - Tiempos de cada animación dentro de `ANIMATIONS`
-- Warm-up: 5000ms al mount inicial
-- Gap entre randoms: `2000 + Math.random() * 6000` ms
+- Warm-up: 3000ms al mount inicial
+- Gap entre randoms: `1000 + Math.random() * 2000` ms
 
 ---
 
