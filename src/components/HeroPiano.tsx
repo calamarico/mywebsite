@@ -46,6 +46,12 @@ export function HeroPiano({
   // CSS interpola entre ticks con `transition: transform 280ms linear`.
   const [progress, setProgress] = useState(0)
 
+  // Volumen (0..1) controlado por el slider sobre las teclas. Default 0.7
+  // alineado con la advertencia de la intro ("turn it down a notch"). Vive
+  // como state local: HeroPiano no se desmonta entre transiciones, así que
+  // el valor sobrevive a los replays vía encore.
+  const [volume, setVolume] = useState(0.7)
+
   const handleTimeUpdate = useCallback(() => {
     const audio = audioRef.current
     if (!audio) return
@@ -59,6 +65,15 @@ export function HeroPiano({
   useEffect(() => {
     if (playing) setProgress(0)
   }, [playing])
+
+  // Sincroniza el state `volume` con el `<audio>`. El effect se ejecuta tras
+  // cada commit, así que en el primer mount audio.volume = 0.7 antes de que
+  // useFFTPiano llame a `audio.play()`.
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.volume = volume
+  }, [volume])
 
   const resolveKey = useCallback((keyIndex: number): HTMLDivElement | null => {
     if (keyIndex < WHITE_COUNT) return whiteRefs.current[keyIndex] ?? null
@@ -104,11 +119,7 @@ export function HeroPiano({
   }, [playing])
 
   return (
-    <div
-      className="hero-piano"
-      role="presentation"
-      aria-hidden="true"
-    >
+    <div className="hero-piano">
       {audioSrc && (
         <audio
           ref={audioRef}
@@ -119,7 +130,10 @@ export function HeroPiano({
           onTimeUpdate={handleTimeUpdate}
         />
       )}
-      <div className="hero-piano__whites">
+      {/* Las teclas son decorativas: aria-hidden para que el lector de
+          pantalla no las anuncie. El slider, en cambio, debe ser accesible,
+          por eso movemos aria-hidden a los hijos en lugar del piano. */}
+      <div className="hero-piano__whites" aria-hidden="true">
         {Array.from({ length: WHITE_COUNT }, (_, i) => (
           <div
             key={`w-${i}`}
@@ -130,7 +144,7 @@ export function HeroPiano({
           />
         ))}
       </div>
-      <div className="hero-piano__blacks">
+      <div className="hero-piano__blacks" aria-hidden="true">
         {Array.from({ length: BLACK_COUNT }, (_, i) => (
           <div
             key={`b-${i}`}
@@ -140,6 +154,18 @@ export function HeroPiano({
             className="hero-piano__black"
           />
         ))}
+      </div>
+      <div className="hero-piano__volume">
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={volume}
+          onChange={(e) => setVolume(parseFloat(e.target.value))}
+          aria-label="Volume"
+          className="hero-piano__volume-input"
+        />
       </div>
       <div
         className="hero-piano__progress"

@@ -297,6 +297,18 @@ Las blancas en grid `repeat(29, 1fr)`. Las negras en `position: absolute` con su
 - **Modo piano activo**: opacidad 1, scale 1, transition 420ms.
 - **Modo texto**: opacidad 0, `transform: translateY(16px) scale(0.94)`.
 
+#### Volume slider
+
+`.hero-piano__volume` (`<div>` con `<input type="range">` dentro) posicionado en absolute sobre las teclas, centrado horizontalmente, ~12% desde abajo del piano. Permite al usuario ajustar volumen en cualquier momento durante la canción, cerrando el loop narrativo de la advertencia del intro ("turn it down a notch").
+
+- **State**: `volume` (0..1) en `HeroPiano`. Default 0.7.
+- **Sync con audio**: `useEffect` que asigna `audioRef.current.volume = volume` cada vez que el state cambia. En el primer mount establece 0.7 antes de que `useFFTPiano` llame a `audio.play()`.
+- **Persistencia**: in-memory en el state. `HeroPiano` no se desmonta entre transiciones, así que el volumen sobrevive a replays vía encore. En reload se resetea.
+- **Pointer events**: `.hero-piano` tiene `pointer-events: none`, por eso `.hero-piano__volume` lleva `pointer-events: auto` explícito.
+- **Visual**: el wrapper tiene background oscuro (`rgba(15, 15, 20, 0.88)`), border sutil y `border-radius: 999px` (forma de píldora), con drop shadow (`0 4px 14px rgba(0, 0, 0, 0.55)`) e inset highlight superior. Aísla el slider de las teclas blancas para que se lea sin importar el fondo. Track interior `rgba(255, 255, 255, 0.22)` (claro contra el wrapper oscuro), thumb lavanda accent con borde blanco. Opacidad 0.9 base, 1 en hover/focus, y el border pasa a accent lavanda al activarse.
+- **Accesibilidad**: `<input type="range">` con `aria-label="Volume"`. Navegable con flechas izquierda/derecha. Focus-visible añade un glow lavanda al thumb.
+- **Estructura aria**: el `aria-hidden="true"` se quitó del `.hero-piano` y se movió a las containers de teclas (`.hero-piano__whites`, `.hero-piano__blacks`) y a `.hero-piano__progress`. Así el slider sigue accesible para lectores de pantalla mientras las teclas (decorativas) quedan ocultas.
+
 #### Barra de progreso
 
 Una `<div class="hero-piano__progress">` justo debajo de las teclas (2px de alto, color accent, opacidad 0.75) muestra cuánto queda de la canción. Implementación:
@@ -1024,6 +1036,9 @@ Aplicado a: `heroModeRef` (App), `modeRef` (Hero), `onStartRef` (KalamaricoAvata
 - `BLACK_COUNT` (20)
 - `DEFAULT_PRESS_MS` (120)
 - `BANDS[]` (5 bandas, cada una con `keys`, `binStart`, `binEnd`, `threshold`, `cooldownMs`)
+- Volume default: `0.7` (state inicial de `volume` en `useState`)
+- Slider input width: `130px` (CSS `.hero-piano__volume-input`); wrapper crece según `padding: 8px 18px`
+- Slider position: `bottom: 2%` (CSS `.hero-piano__volume`)
 
 `.hero-piano__progress` (CSS):
 - `bottom: -10px` (separación bajo las teclas)

@@ -541,6 +541,96 @@ img { display: block; max-width: 100%; }
     2px 6px 10px rgba(0, 0, 0, 0.6);
 }
 
+/* Slider de volumen sobre las teclas. Posicionado en absolute dentro del
+   piano, centrado horizontalmente, en el tercio inferior. Necesita
+   `pointer-events: auto` explícito porque el padre `.hero-piano` lo
+   bloquea para todo lo demás. */
+.hero-piano__volume {
+  position: absolute;
+  bottom: 2%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  pointer-events: auto;
+  opacity: 0.9;
+  transition:
+    opacity 220ms var(--ease-out),
+    border-color 220ms var(--ease-out);
+  z-index: 2;
+  background: rgba(15, 15, 20, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.hero-piano__volume:hover,
+.hero-piano__volume:focus-within {
+  opacity: 1;
+  border-color: rgba(224, 160, 255, 0.35);
+}
+
+.hero-piano__volume-input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 130px;
+  height: 4px;
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+  padding: 0;
+}
+
+.hero-piano__volume-input::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+}
+.hero-piano__volume-input::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Thumb: lavanda accent con borde blanco para diferenciarse del flash
+   de teclas pulsadas (también lavanda). */
+.hero-piano__volume-input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+.hero-piano__volume-input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+.hero-piano__volume-input:focus { outline: none; }
+.hero-piano__volume-input:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.4),
+    0 0 0 3px rgba(224, 160, 255, 0.4);
+}
+.hero-piano__volume-input:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.4),
+    0 0 0 3px rgba(224, 160, 255, 0.4);
+}
+
 /* Barra de progreso de la canción. Justo debajo de las teclas, scaleX con
    transición linear que interpola entre los `timeupdate` del audio (~4-5
    fps), dando una sensación fluida sin RAF dedicado. */
