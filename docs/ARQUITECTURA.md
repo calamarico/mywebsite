@@ -202,7 +202,7 @@ Núcleo de la lógica. Gestiona:
 - **`window.addEventListener('click' | 'keydown')`** registrado una sola vez. Al primer evento marca `hasInteractedRef = true`, llama `startIntro()`, y se desregistra.
 - **`onMouseEnter` del h1** → `handleTitleEnter`: dispara la animación random del avatar (`onTitleHover`). **No afecta al modo** — el hover es solo para el avatar.
 - **`onComplete` del `<KalAmaricoIntro>`** → `handleIntroComplete`: ~17s después del montaje del intro, transiciona a `mode = 'piano'`. Si en ese intervalo el audio falló (`pianoDisabledRef = true`), vuelve a `'text'` en su lugar.
-- **`onAudioEnded` del `<HeroPiano>`** → `exitPianoMode`: ruta de salida natural del modo piano (canción terminada). Vuelve a texto, marca `pianoDisabledRef = true`, y si no hubo fallo de audio activa `encoreAvailable = true` para mostrar el replay.
+- **`onAudioEnded` del `<HeroPiano>`** → `exitPianoMode`: ruta de salida natural del modo piano (canción terminada). Vuelve a texto, marca `pianoDisabledRef = true`, y si no hubo fallo de audio activa `encoreAvailable = true` para mostrar el replay. **También se invoca como red de seguridad** desde los handlers `onPause`/`onError` del `<audio>` cuando el browser pausa o errora el medio fuera de nuestro control (media key residual, focus loss, decoding error). Así, si una interrupción externa rompe el playback, salimos a text con encore disponible en lugar de quedar atascados en piano sin sonido. Las guardas (`!playing`, `audio.ended`) evitan doble disparo cuando es la pausa legítima del cleanup del effect o el final natural de la canción.
 - **Exit manual del replay** (solo cuando `mode === 'piano' && encoreAvailable`): un `useEffect` registra listeners de click y keydown a nivel `document`. Click fuera de `.hero-stage` (ref `stageRef`) o tecla `Escape` invocan `exitPianoMode`. **Solo en replays**, no en el primer ciclo: en la primera pasada el usuario debe vivir la experiencia completa; en replays ya la conoce y puede salir cuando quiera.
 - **`onAudioFailed` del `<HeroPiano>`** → `handleAudioFailed`: si el hook reporta fallo definitivo (unlock o `audio.play()` rechaza), marca `pianoDisabledRef = true` Y `audioFailedRef = true`, y si estábamos en intro o piano, sale a texto inmediatamente. **No** activa `encoreAvailable`.
 - **`onClick` del link `encore?`** → `handleEncoreClick`: replay manual. Llama a `e.stopPropagation()` (para que el handler global de App no dispare `surprised`), comprueba que el audio no falló y que `mode === 'text'`, y hace `setMode('piano')` directamente — saltándose la intro de 17s.
@@ -319,6 +319,14 @@ Una `<div class="hero-piano__progress">` justo debajo de las teclas (2px de alto
 - CSS interpola entre ticks: `transition: transform 280ms linear`. La barra avanza fluida visualmente entre actualizaciones del audio.
 - En `prefers-reduced-motion: reduce` se quita la transition (la barra salta en cada tick sin interpolación animada).
 - Reset a `0` cuando `playing` flipa a `true` — evita que en el replay/encore la barra empiece llena de la canción anterior antes del primer `timeupdate`.
+
+#### Aislamiento de media keys
+
+Mientras `playing === true`, `HeroPiano` registra handlers vacíos en `navigator.mediaSession` para `pause`, `play`, `previoustrack`, `nexttrack`, `seekbackward`, `seekforward` y `stop`. El cleanup del effect los desregistra (`setActionHandler(action, null)`).
+
+Sin esto, las teclas multimedia del laptop (volume, prev/next track, etc.) — cuando `document.activeElement` no es el slider — pueden disparar el default Media Session handling del browser sobre el `<audio>` activo: pausar, hacer seek, etc. Como el `MediaElementAudioSourceNode` deja de feedear al `AnalyserNode`, el RAF loop sigue pero lee silencio: ninguna tecla flashea, el `timeupdate` se detiene y la página queda atascada en piano sin sonido. Registrar noops señala al browser "yo manejo estas acciones" y bloquea el efecto por defecto. Soporte progresivo: si `navigator.mediaSession` no existe, el effect es no-op; las acciones no soportadas caen al `try/catch`.
+
+Como red de seguridad complementaria, los handlers `onPause` y `onError` del `<audio>` invocan `onAudioEnded` (con guardas `!playing` y `audio.ended` para evitar doble disparo en pausas legítimas y final natural) — ver "Eventos" en la sección de Hero.
 
 #### Flasheo imperativo
 

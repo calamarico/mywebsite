@@ -118,6 +118,44 @@ export function HeroPiano({
     })
   }, [playing])
 
+  // Bloquea el default handling del browser para media keys (volume keys, F8/9
+  // playback, etc.) mientras suena la canción. Sin esto, con focus en <body>
+  // el browser puede pausar el <audio> "en silencio" — el RAF sigue, pero el
+  // analyser lee ceros y el piano queda atascado sin sonido. Registrar noops
+  // en MediaSession le dice al browser "yo manejo estas acciones" y bloquea
+  // el efecto por defecto. No-op si `navigator.mediaSession` no existe.
+  useEffect(() => {
+    if (!playing) return
+    if (typeof navigator === 'undefined' || !navigator.mediaSession) return
+    const ms = navigator.mediaSession
+    const actions: MediaSessionAction[] = [
+      'pause', 'play', 'previoustrack', 'nexttrack',
+      'seekbackward', 'seekforward', 'stop',
+    ]
+    const noop = () => {}
+    actions.forEach((a) => {
+      try { ms.setActionHandler(a, noop) } catch { /* unsupported action */ }
+    })
+    return () => {
+      actions.forEach((a) => {
+        try { ms.setActionHandler(a, null) } catch { /* ignore */ }
+      })
+    }
+  }, [playing])
+
+  // Red de seguridad: si el <audio> es pausado o errora por algo externo
+  // (media key residual, focus loss, decoding error...), salimos limpios al
+  // mismo path que el final natural — mode='text' con encore disponible —
+  // en lugar de quedar atascados. Las guardas evitan doble disparo cuando es
+  // el cleanup legítimo del effect el que pausa.
+  const handleUnexpectedStop = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (!playing) return
+    if (audio.ended) return
+    onAudioEnded?.()
+  }, [playing, onAudioEnded])
+
   return (
     <div className="hero-piano">
       {audioSrc && (
@@ -128,6 +166,8 @@ export function HeroPiano({
           playsInline
           onEnded={onAudioEnded}
           onTimeUpdate={handleTimeUpdate}
+          onPause={handleUnexpectedStop}
+          onError={handleUnexpectedStop}
         />
       )}
       {/* Las teclas son decorativas: aria-hidden para que el lector de
